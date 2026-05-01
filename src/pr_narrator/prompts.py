@@ -40,6 +40,7 @@ Hard rules:
 - Only describe what's actually in the diff or transcript. Do not invent rationale.
 - When the transcript shows a decision (chose X over Y, pivoted from A to B), surface it. These are the parts a reviewer can't recover from the diff alone.
 - When you don't know something, say "not specified in the session" rather than guessing.
+- When listing rejected alternatives, quote or closely paraphrase the actual rejection rationale from the transcript. Do NOT synthesize a plausible-sounding rationale from your own knowledge of the technology. If the transcript doesn't specify why something was rejected, say "rationale not specified in the session" rather than guessing.
 - Keep the markdown body under 500 words.
 
 Output format (exactly this structure):
@@ -62,7 +63,13 @@ considered_alternatives: <true|false>
 <prose, 2-4 sentences. How you solved it>
 
 ## Considered & rejected
-<bulleted list IF the transcript shows alternatives that were considered. Otherwise omit this section entirely>
+<bulleted list IF the transcript shows alternatives that were considered. Otherwise omit this section entirely.>
+
+Worked example for this section:
+
+  GOOD: "PyYAML for frontmatter parsing — rejected because we have a 'no new dependencies' rule and the format is 5 flat scalar keys we control."
+
+  BAD:  "PyYAML for frontmatter parsing — rejected because it has historical CVEs in its default loader." (Don't invent technical rationales the transcript didn't discuss.)
 
 ## Risk
 <prose, 1-2 sentences. What could go wrong, what reviewers should look at carefully>

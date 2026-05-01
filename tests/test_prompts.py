@@ -5,6 +5,7 @@ from __future__ import annotations
 from pr_narrator.compressor import CompressedEntry, CompressedTranscript
 from pr_narrator.prompts import (
     DIFF_BYTE_BUDGET,
+    SYSTEM_PROMPT,
     parse_diff_into_files,
     render_timeline,
     render_user_prompt,
@@ -243,3 +244,24 @@ def test_render_timeline_omitted_count_zero_returns_full() -> None:
     # entry 1 → omitted_count == 0 → return full, no notes.
     assert notes == []
     assert "[... timeline middle truncated:" not in out
+
+
+def test_system_prompt_forbids_invented_rejection_rationales() -> None:
+    # Anti-fabrication rule under "Hard rules" — added after a real
+    # synthesis run hallucinated a rationale not present in the
+    # transcript. Asserting the wording so future edits don't
+    # accidentally drop it.
+    assert (
+        "quote or closely paraphrase the actual rejection rationale from the transcript"
+        in SYSTEM_PROMPT
+    )
+    assert "rationale not specified in the session" in SYSTEM_PROMPT
+
+
+def test_system_prompt_includes_good_bad_worked_example() -> None:
+    # Worked example under "Considered & rejected" pairs a GOOD and BAD
+    # phrasing for the same rejected technology, teaching the model to
+    # source rationale from the transcript rather than its own priors.
+    assert "GOOD:" in SYSTEM_PROMPT
+    assert "BAD:" in SYSTEM_PROMPT
+    assert "Don't invent technical rationales the transcript didn't discuss" in SYSTEM_PROMPT
