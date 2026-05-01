@@ -1,0 +1,20 @@
+{"type":"summary","summary":"Initial session bootstrap","leafUuid":"00000000-0000-0000-0000-000000000001"}
+{"type":"user","uuid":"u-0001","parentUuid":null,"sessionId":"deadbeef-1111-2222-3333-444455556666","timestamp":"2026-05-01T10:00:00.000Z","cwd":"/Users/test/proj","gitBranch":"main","version":"1.0.0","message":{"role":"user","content":"fix the bug in foo.py"}}
+{"type":"assistant","uuid":"a-0001","parentUuid":"u-0001","sessionId":"deadbeef-1111-2222-3333-444455556666","timestamp":"2026-05-01T10:00:05.000Z","message":{"role":"assistant","content":[{"type":"thinking","thinking":"redacted reasoning"}]}}
+{"type":"assistant","uuid":"a-0002","parentUuid":"a-0001","sessionId":"deadbeef-1111-2222-3333-444455556666","timestamp":"2026-05-01T10:00:06.000Z","message":{"role":"assistant","content":[{"type":"text","text":"Looking at foo.py now."}]}}
+{"type":"assistant","uuid":"a-0003","parentUuid":"a-0002","sessionId":"deadbeef-1111-2222-3333-444455556666","timestamp":"2026-05-01T10:00:07.000Z","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_01","name":"Read","input":{"file_path":"/proj/foo.py"}}]}}
+{"type":"user","uuid":"u-0002","parentUuid":"a-0003","sessionId":"deadbeef-1111-2222-3333-444455556666","timestamp":"2026-05-01T10:00:08.000Z","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_01","content":"def foo():\n    pass","is_error":false}]}}
+{"type":"assistant","uuid":"a-0004","parentUuid":"u-0002","sessionId":"deadbeef-1111-2222-3333-444455556666","timestamp":"2026-05-01T10:00:09.000Z","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_02","name":"Edit","input":{"file_path":"/proj/foo.py","old_string":"pass","new_string":"return 1"}}]}}
+{"type":"user","uuid":"u-0003","parentUuid":"a-0004","sessionId":"deadbeef-1111-2222-3333-444455556666","timestamp":"2026-05-01T10:00:10.000Z","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_02","content":[{"type":"text","text":"file edited"}],"is_error":false}]}}
+{"type":"assistant","uuid":"a-0005","parentUuid":"u-0003","sessionId":"deadbeef-1111-2222-3333-444455556666","timestamp":"2026-05-01T10:00:11.000Z","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_03","name":"Bash","input":{"command":"pytest"}}]}}
+{"type":"user","uuid":"u-0004","parentUuid":"a-0005","sessionId":"deadbeef-1111-2222-3333-444455556666","timestamp":"2026-05-01T10:00:12.000Z","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_03","content":"command failed","is_error":true}]}}
+{"type":"user","uuid":"u-0005","parentUuid":"u-0004","sessionId":"deadbeef-1111-2222-3333-444455556666","timestamp":"2026-05-01T10:01:00.000Z","message":{"role":"user","content":"no, use Redis instead"}}
+{"type":"assistant","uuid":"a-0006","parentUuid":"u-0005","sessionId":"deadbeef-1111-2222-3333-444455556666","timestamp":"2026-05-01T10:01:05.000Z","message":{"role":"assistant","content":[{"type":"text","text":"Switching to Redis."},{"type":"tool_use","id":"toolu_04","name":"Edit","input":{"file_path":"/proj/foo.py"}}]}}
+{"type":"user","uuid":"u-0006","parentUuid":"a-0006","sessionId":"deadbeef-1111-2222-3333-444455556666","timestamp":"2026-05-01T10:01:06.000Z","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_04","content":"file edited"}]}}
+{"type":"compaction","timestamp":"2026-05-01T10:02:00.000Z","data":{"reason":"context-limit"}}
+{"type":"attachment","uuid":"att-0001","timestamp":"2026-05-01T10:02:30.000Z","attachment":{"name":"screenshot.png"}}
+{"type":"ai-title","sessionId":"deadbeef-1111-2222-3333-444455556666","aiTitle":"fix foo bug"}
+{"sessionId":"deadbeef-1111-2222-3333-444455556666","note":"line with no type field"}
+not valid json at all {{
+{"type":"user","uuid":"u-0007","parentUuid":null,"sessionId":"deadbeef-1111-2222-3333-444455556666","timestamp":"2026-05-01T10:03:00.000Z","message":{"role":"user","content":"this message has more than eighty characters so the cli summary should truncate it with an ellipsis"}}
+{"type":"summary","summary":"Final summary","timestamp":"2026-05-01T10:04:00.000Z"}

@@ -8,6 +8,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Session transcript discovery (`list_sessions`, `find_latest_session`,
+  `find_session_by_id`) under `pr_narrator.discovery`, with
+  `SessionMeta`, `SessionNotFoundError`, and `AmbiguousMatchError`.
+- Streaming JSONL session parser (`parse_session`, `load_session`)
+  yielding typed `UserMessage`, `AssistantTurn`, `ToolCall`,
+  `ToolResult`, and `MetaEvent` events; tolerates malformed lines and
+  unknown event types.
+- `pr-narrator inspect latest` and `pr-narrator inspect from <id>`
+  CLI commands that print a structured per-session summary (header
+  with size/event-count/mtime, user-message timeline with relative
+  mm:ss timestamps, top-5 tool-call breakdown, meta-event counts).
 - Initial Python project scaffolding: `pyproject.toml` (hatchling build backend),
   `src/pr_narrator/` package with version export and `pr-narrator` CLI entry
   point printing a version stub.
