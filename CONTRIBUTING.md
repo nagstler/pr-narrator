@@ -44,6 +44,29 @@ type, e.g. `feat!: drop Python 3.10 support`.
 - Fill out the PR template — keep the body short and check the boxes that
   apply.
 
+## Continuous integration
+
+Every PR runs the following checks via GitHub Actions:
+
+- **Test matrix** — `pytest --cov` on Python 3.11, 3.12, and 3.13 (Ubuntu)
+- **Lint** — `ruff check` and `ruff format --check`
+- **Type check** — `mypy src/`
+- **Commit lint** — every commit and the PR title must follow Conventional Commits
+
+All checks must pass before a PR can be merged. (Required status checks
+will be enforced on `main` once this CI scaffolding lands.)
+
+To run the same checks locally before pushing:
+
+```bash
+uv run ruff check
+uv run ruff format --check
+uv run mypy src/
+uv run pytest --cov=pr_narrator
+```
+
+Coverage reports upload to Codecov from the Python 3.11 leg of the matrix.
+
 ## Local development
 
 This project uses [uv](https://docs.astral.sh/uv/) for everything: install,
