@@ -8,6 +8,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Transcript compressor (`pr_narrator.compressor`): deterministic,
+  rule-based compression of parsed session events into a
+  `CompressedTranscript` (timeline of user / decision / tool_burst /
+  tool_call / error / compaction entries plus tool-call summary,
+  user-intent chain, and duration).
+- Git diff capture utilities (`pr_narrator.diff`): `get_branch_diff`
+  (three-dot), `get_changed_files`, `get_commit_messages` (two-dot),
+  `get_current_branch`. Typed errors `NotInGitRepoError` and
+  `UnknownBaseRefError`.
+- LLM synthesis layer (`pr_narrator.synthesizer`): renders a
+  compressed transcript + diff into a prompt, invokes
+  `claude -p --output-format json --no-session-persistence --tools ""`
+  via subprocess, parses the response into a `SynthesisResult`
+  (markdown, frontmatter, cost estimate, prompt provenance,
+  truncation notes, timestamp). Three-tier frontmatter validation
+  with normalization and an optional `--strict` mode. Auth is
+  delegated entirely to whatever Claude Code is configured with —
+  pr-narrator adds no env-var requirements. New errors:
+  `ClaudeBinaryNotFoundError`, `SynthesisError`.
+- `pr-narrator synthesize latest` and `pr-narrator synthesize from
+  <id>` CLI commands with `--base`, `--model`, `--no-frontmatter`,
+  `--debug`, `--strict` options. `--debug` writes prompt and raw
+  response (with byte counts) to stderr so stdout stays clean for
+  piping into `gh pr create -F -`.
+- Dual-audience output: GFM markdown body for human reviewers plus
+  hidden YAML-style frontmatter inside an HTML comment for
+  automated review bots (CodeRabbit, Greptile).
 - Session transcript discovery (`list_sessions`, `find_latest_session`,
   `find_session_by_id`) under `pr_narrator.discovery`, with
   `SessionMeta`, `SessionNotFoundError`, and `AmbiguousMatchError`.
