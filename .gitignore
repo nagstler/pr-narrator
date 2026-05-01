@@ -32,3 +32,6 @@ coverage.xml
 
 # OS
 .DS_Store
+
+# Superpowers internal working memory (specs, plans, scratch)
+docs/superpowers/
