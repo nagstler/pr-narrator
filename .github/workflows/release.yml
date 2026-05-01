@@ -1,0 +1,38 @@
+# TODO: PyPI release on tag push — implemented in a later session.
+#
+# Planned design (not yet wired):
+#   on:
+#     push:
+#       tags: ["v*.*.*"]
+#   jobs:
+#     publish:
+#       runs-on: ubuntu-latest
+#       environment: pypi
+#       permissions:
+#         id-token: write   # trusted publishing (no API token)
+#       steps:
+#         - actions/checkout@v4
+#         - astral-sh/setup-uv@v3
+#         - uv build
+#         - pypa/gh-action-pypi-publish@release/v1
+#
+# This file exists now so future contributors see the intent. The
+# `workflow_dispatch` trigger below makes it a valid, registered workflow
+# that can only be invoked manually from the Actions tab — it is not yet
+# wired up to do anything useful.
+
+name: release
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  noop:
+    name: placeholder (release not yet wired)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Print stub message
+        run: echo "release.yml is a stub — see comment block at the top of the file."
