@@ -117,14 +117,14 @@ The block lists category and location only — never the secret value.
 
 ### Dry run
 
+`--dry-run` synthesizes the description and writes it straight to stdout — no `git push`, no GitHub API call, no PR created. It's the safest way to preview what `pr-narrator create` would post:
+
 ```bash
-$ pr-narrator create latest --dry-run
-Would create PR:
-  base:  main
-  head:  feat/redactor-paranoid
-  draft: true
-  title: feat(redactor): add --paranoid mode for aggressive redaction
-  body:  (3,182 bytes — pass --debug to see the full body)
+# Preview the body that would be posted, then bail out.
+pr-narrator create latest --dry-run
+
+# Or capture it for inspection / piping into your own tooling.
+pr-narrator create latest --dry-run > /tmp/pr-body.md
 ```
 
 ## Configuration
