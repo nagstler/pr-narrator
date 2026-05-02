@@ -70,9 +70,7 @@ PATTERNS: Final[tuple[Pattern, ...]] = (
     ),
     Pattern(
         name="aws_secret_key",
-        regex=re.compile(
-            r"(?i)aws_secret_access_key[\"\s:=]+([a-zA-Z0-9/+=]{40})"
-        ),
+        regex=re.compile(r"(?i)aws_secret_access_key[\"\s:=]+([a-zA-Z0-9/+=]{40})"),
         paranoid_only=False,
         description="AWS secret access key (value group only)",
     ),
@@ -102,9 +100,7 @@ PATTERNS: Final[tuple[Pattern, ...]] = (
     ),
     Pattern(
         name="jwt",
-        regex=re.compile(
-            r"eyJ[a-zA-Z0-9_-]+\.eyJ[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+"
-        ),
+        regex=re.compile(r"eyJ[a-zA-Z0-9_-]+\.eyJ[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+"),
         paranoid_only=False,
         description="JSON Web Token (3-segment base64url)",
     ),
@@ -119,9 +115,7 @@ PATTERNS: Final[tuple[Pattern, ...]] = (
     ),
     Pattern(
         name="private_ssh_key",
-        regex=re.compile(
-            r"-----BEGIN (?:RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----"
-        ),
+        regex=re.compile(r"-----BEGIN (?:RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----"),
         paranoid_only=False,
         description="PEM private key header",
     ),

@@ -91,9 +91,7 @@ def test_conservative_pattern_matches(text: str, category: str) -> None:
 )
 def test_conservative_pattern_does_not_false_positive(text: str) -> None:
     result = redact(text)
-    assert result.redactions == [], (
-        f"unexpected redactions {result.redactions} for {text!r}"
-    )
+    assert result.redactions == [], f"unexpected redactions {result.redactions} for {text!r}"
     assert result.text == text
 
 
@@ -120,9 +118,7 @@ _PARANOID_CATEGORIES = {
         ("server is at 172.16.5.10 today", "private_ipv4"),
     ],
 )
-def test_paranoid_pattern_matches_only_when_enabled(
-    text: str, category: str
-) -> None:
+def test_paranoid_pattern_matches_only_when_enabled(text: str, category: str) -> None:
     off = redact(text, paranoid=False)
     assert all(r.category != category for r in off.redactions)
 
@@ -145,9 +141,9 @@ def test_paranoid_pattern_matches_only_when_enabled(
 )
 def test_paranoid_negatives(text: str) -> None:
     result = redact(text, paranoid=True)
-    assert all(
-        r.category not in _PARANOID_CATEGORIES for r in result.redactions
-    ), f"unexpected paranoid redaction: {result.redactions}"
+    assert all(r.category not in _PARANOID_CATEGORIES for r in result.redactions), (
+        f"unexpected paranoid redaction: {result.redactions}"
+    )
 
 
 def test_high_entropy_skips_low_entropy_run() -> None:
@@ -176,11 +172,7 @@ def test_location_no_prefix_with_line() -> None:
 
 
 def test_multiple_redactions_in_one_input() -> None:
-    text = (
-        "first sk-ant-" + "A" * 50
-        + " then ghp_" + "x" * 36
-        + " plus AKIAABCDEFGHIJKLMNOP"
-    )
+    text = "first sk-ant-" + "A" * 50 + " then ghp_" + "x" * 36 + " plus AKIAABCDEFGHIJKLMNOP"
     result = redact(text)
     cats = [r.category for r in result.redactions]
     assert cats == ["anthropic_api_key", "github_pat", "aws_access_key"]

@@ -254,9 +254,7 @@ def synthesize_pr_description(
 
     if input_redactions:
         cats = sorted({r.category for r in input_redactions})
-        truncation_notes.append(
-            f"Redacted {len(input_redactions)} items: {', '.join(cats)}"
-        )
+        truncation_notes.append(f"Redacted {len(input_redactions)} items: {', '.join(cats)}")
 
     argv = [
         claude_binary,

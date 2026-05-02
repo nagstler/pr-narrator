@@ -580,9 +580,7 @@ def _compressed_with_secret() -> CompressedTranscript:
     return CompressedTranscript(
         timeline=[
             CompressedEntry(timestamp_offset=0, kind="user", text="hi"),
-            CompressedEntry(
-                timestamp_offset=10, kind="user", text=f"the key is {_SECRET}"
-            ),
+            CompressedEntry(timestamp_offset=10, kind="user", text=f"the key is {_SECRET}"),
         ],
         tool_call_summary={"Edit": 1},
         user_intent_chain=["hi", f"the key is {_SECRET}"],
@@ -593,11 +591,7 @@ def _compressed_with_secret() -> CompressedTranscript:
 
 def test_input_redaction_strips_secret_before_prompt() -> None:
     diff_with_secret = (
-        "diff --git a/.env b/.env\n"
-        "--- a/.env\n"
-        "+++ b/.env\n"
-        "@@ -1 +1 @@\n"
-        f"+API_KEY={_SECRET}\n"
+        f"diff --git a/.env b/.env\n--- a/.env\n+++ b/.env\n@@ -1 +1 @@\n+API_KEY={_SECRET}\n"
     )
     with patch(
         "pr_narrator.synthesizer.subprocess.run",

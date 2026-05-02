@@ -241,9 +241,7 @@ def _emit_debug(result: SynthesisResult) -> None:
     else:
         click.echo(f"(unknown) ({result.model})", err=True)
     if result.redactions:
-        click.echo(
-            f"=== REDACTIONS ({len(result.redactions)} applied) ===", err=True
-        )
+        click.echo(f"=== REDACTIONS ({len(result.redactions)} applied) ===", err=True)
         for r in result.redactions:
             click.echo(
                 f"- {r.category} in {r.location} @ bytes {r.span[0]}-{r.span[1]}",

@@ -918,9 +918,7 @@ def test_debug_omits_redactions_block_when_none(
     projects, cwd = fake_cli_env
     _install_fixture_session(projects, cwd)
     _stub_git(monkeypatch)
-    monkeypatch.setattr(
-        "pr_narrator.cli.synthesize_pr_description", lambda **_kw: _fake_result()
-    )
+    monkeypatch.setattr("pr_narrator.cli.synthesize_pr_description", lambda **_kw: _fake_result())
     runner = CliRunner()
     result = runner.invoke(main, ["synthesize", "latest", "--debug"])
     assert result.exit_code == 0, result.stderr
