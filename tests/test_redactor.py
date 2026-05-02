@@ -154,3 +154,70 @@ def test_high_entropy_skips_low_entropy_run() -> None:
     text = "value=" + ("a" * 32)
     result = redact(text, paranoid=True)
     assert all(r.category != "high_entropy" for r in result.redactions)
+
+
+def test_location_prefix_concatenated() -> None:
+    text = "key=sk-ant-" + "A" * 50
+    result = redact(text, location_prefix="user_intent_chain[2]")
+    assert len(result.redactions) == 1
+    assert result.redactions[0].location == "user_intent_chain[2]"
+
+
+def test_location_includes_line_for_multiline() -> None:
+    text = "first\nkey=sk-ant-" + "A" * 50 + "\nthird"
+    result = redact(text, location_prefix="diff:src/config.py")
+    assert result.redactions[0].location == "diff:src/config.py:line 2"
+
+
+def test_location_no_prefix_with_line() -> None:
+    text = "first\nkey=sk-ant-" + "A" * 50 + "\nthird"
+    result = redact(text)
+    assert result.redactions[0].location == "line 2"
+
+
+def test_multiple_redactions_in_one_input() -> None:
+    text = (
+        "first sk-ant-" + "A" * 50
+        + " then ghp_" + "x" * 36
+        + " plus AKIAABCDEFGHIJKLMNOP"
+    )
+    result = redact(text)
+    cats = [r.category for r in result.redactions]
+    assert cats == ["anthropic_api_key", "github_pat", "aws_access_key"]
+    assert result.text.count("[REDACTED:") == 3
+
+
+def test_overlap_first_match_wins() -> None:
+    # Conservative anthropic pattern should win over paranoid high_entropy
+    # on the same span.
+    text = "sk-ant-" + "A" * 50
+    result = redact(text, paranoid=True)
+    assert len(result.redactions) == 1
+    assert result.redactions[0].category == "anthropic_api_key"
+
+
+def test_idempotent_on_already_redacted_text() -> None:
+    text = "key=sk-ant-" + "A" * 50
+    once = redact(text)
+    twice = redact(once.text)
+    assert twice.text == once.text
+    assert twice.redactions == []
+
+
+def test_empty_input_returns_empty_result() -> None:
+    result = redact("")
+    assert result.text == ""
+    assert result.redactions == []
+
+
+def test_no_match_returns_text_unchanged() -> None:
+    result = redact("plain prose with no secrets in it.", paranoid=True)
+    assert result.text == "plain prose with no secrets in it."
+    assert result.redactions == []
+
+
+def test_redactions_are_in_span_order() -> None:
+    text = "ghp_" + "x" * 36 + " then sk-ant-" + "A" * 50
+    result = redact(text)
+    spans = [r.span for r in result.redactions]
+    assert spans == sorted(spans)

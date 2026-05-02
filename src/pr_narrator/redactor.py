@@ -190,10 +190,8 @@ def _shannon_entropy(s: str) -> float:
 
 
 def _match_span(pattern: Pattern, match: re.Match[str]) -> tuple[int, int]:
-    if pattern.name in _VALUE_GROUP_PATTERNS and match.lastindex:
-        start, end = match.span(1)
-        if start >= 0:
-            return start, end
+    if pattern.name in _VALUE_GROUP_PATTERNS:
+        return match.span(1)
     return match.span()
 
 
