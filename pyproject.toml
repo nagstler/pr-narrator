@@ -80,4 +80,5 @@ skip_covered = false
 name = "cz_conventional_commits"
 version_provider = "pep621"
 tag_format = "v$version"
-update_changelog_on_bump = true
+update_changelog_on_bump = false
+bump_message = "chore: bump version $current_version → $new_version"
