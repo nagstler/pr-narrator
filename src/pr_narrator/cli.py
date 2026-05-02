@@ -185,28 +185,73 @@ def _strip_frontmatter(markdown: str) -> str:
 
 _CONVENTIONAL_PREFIX = re.compile(r"^(\w+)(\([^)]+\))?:\s*")
 
+# Always-skip noise patterns: these never make sense as a PR title regardless
+# of the PR's change_type (a "fixup!" commit isn't a meaningful headline even
+# for fixup-heavy work).
+_ALWAYS_SKIP_PATTERNS: tuple[re.Pattern[str], ...] = (
+    re.compile(r"^fixup!", re.IGNORECASE),
+    re.compile(r"^squash!", re.IGNORECASE),
+    re.compile(r"^chore(\([^)]+\))?:.*format", re.IGNORECASE),
+)
 
-def _build_pr_title(result: SynthesisResult, commit_messages: list[str]) -> str:
-    """Compose a PR title from synthesis frontmatter + most-recent commit subject.
+# Categorical skip patterns: skipped by default, but "unlocked" when the PR's
+# change_type matches the category. A docs-heavy PR with `change_type=docs`
+# should be allowed to source its title from a docs commit.
+_CATEGORICAL_SKIP_PATTERNS: dict[str, re.Pattern[str]] = {
+    "style": re.compile(r"^style(\([^)]+\))?:", re.IGNORECASE),
+    "docs": re.compile(r"^docs(\([^)]+\))?:", re.IGNORECASE),
+    "wip": re.compile(r"^wip(\([^)]+\))?:", re.IGNORECASE),
+}
 
-    Happy path: frontmatter has change_type and scope -> strip any leading
-    conventional-commit prefix from the most recent commit subject and
-    prepend f"{change_type}({scope}): ".
 
-    Fallback: use the most recent commit subject verbatim.
+def _is_skip_commit(subject: str, change_type: str | None = None) -> bool:
+    if any(p.search(subject) for p in _ALWAYS_SKIP_PATTERNS):
+        return True
+    for category, pattern in _CATEGORICAL_SKIP_PATTERNS.items():
+        if change_type == category:
+            continue
+        if pattern.search(subject):
+            return True
+    return False
+
+
+def _pick_title_source(commit_messages: list[str], change_type: str | None = None) -> str:
+    """Pick the best commit subject to seed the PR title.
+
+    `commit_messages` is the output of ``git log base..HEAD --pretty=format:%s``,
+    so it is newest-first: index 0 is the most recent commit, index -1 is the
+    oldest. Walk newest -> oldest and return the first subject that isn't a
+    fixup, squash, or "chore: ... format ..." cleanup, and that isn't a
+    style/docs/wip commit *unless* the synthesis frontmatter says the PR's
+    own change_type is style/docs/wip — in which case those commits are
+    eligible (a docs PR shouldn't reach for a stray fix commit just because
+    every docs commit was reflexively skipped). Fall back to the newest
+    subject when every commit matches a skip pattern.
     """
-    # TODO: skip fixup!/squash!/style: commits when picking title source.
-    # For now we use the most recent commit verbatim and trust draft-mode
-    # review to catch awkward titles.
     if not commit_messages:
         return "(no commits on branch)"
-    latest = commit_messages[-1]
+    for subject in commit_messages:
+        if not _is_skip_commit(subject, change_type):
+            return subject
+    return commit_messages[0]
 
+
+def _build_pr_title(result: SynthesisResult, commit_messages: list[str]) -> str:
+    """Compose a PR title from synthesis frontmatter + best-fit commit subject.
+
+    Happy path: frontmatter has change_type and scope -> strip any leading
+    conventional-commit prefix from the chosen commit subject and prepend
+    f"{change_type}({scope}): ".
+
+    Fallback: use the chosen commit subject verbatim.
+    """
     fm = result.frontmatter
+    change_type = fm.get("change_type") if fm is not None else None
+    source = _pick_title_source(commit_messages, change_type=change_type)
     if result.frontmatter_complete and fm is not None and "change_type" in fm and "scope" in fm:
-        stripped = _CONVENTIONAL_PREFIX.sub("", latest).lstrip()
+        stripped = _CONVENTIONAL_PREFIX.sub("", source).lstrip()
         return f"{fm['change_type']}({fm['scope']}): {stripped}"
-    return latest
+    return source
 
 
 def _emit_debug(result: SynthesisResult) -> None:

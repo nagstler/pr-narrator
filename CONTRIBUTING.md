@@ -133,3 +133,29 @@ When redaction does fire, you'll see categorical placeholders like
 `[REDACTED:anthropic_api_key]` in the output; run with `--debug`
 to see a per-redaction listing on stderr (categories and locations
 only, never the secret value).
+
+## Release process
+
+We follow [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html).
+Pre-1.0, the public surface (CLI flags, output formats, exit codes,
+library API) may change between minor versions; we'll call out
+user-visible breaks in the `CHANGELOG`. Once we cut 1.0, breaking
+changes are reserved for major bumps.
+
+Releases are tag-driven. Pushing a tag of the form `v*.*.*` to `main`
+triggers `release.yml`, which builds the wheel and source distribution
+with `uv build`, then publishes them to PyPI via Trusted Publishing.
+
+To cut a release:
+
+```bash
+# Update version + changelog from conventional commits since the last tag.
+uv run cz bump
+
+# Push the bump commit and the new tag.
+git push origin main --follow-tags
+```
+
+Don't edit `pyproject.toml`'s `version` field by hand — `cz bump` is
+the only supported way to change it. Don't push tags from a feature
+branch; releases come from `main` only.
