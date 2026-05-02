@@ -25,3 +25,15 @@ class ClaudeBinaryNotFoundError(Exception):
 
 class SynthesisError(Exception):
     """Raised when synthesis fails (timeout, malformed response, error from claude -p)."""
+
+
+class GitHubCliNotFoundError(Exception):
+    """Raised when the `gh` CLI cannot be found on PATH."""
+
+
+class PushFailedError(Exception):
+    """Raised when `git push` fails."""
+
+
+class PRCreationError(Exception):
+    """Raised when `gh pr create` fails."""
