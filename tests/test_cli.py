@@ -814,3 +814,135 @@ def test_create_no_commits_uses_placeholder_title(
     assert result.exit_code == 0, result.stderr
     assert state["created"] is not None
     assert state["created"]["title"] == "(no commits on branch)"  # type: ignore[index]
+
+
+# ---------------------------------------------------------------------------
+# redaction integration tests
+# ---------------------------------------------------------------------------
+
+
+from pr_narrator.redactor import Redaction as _Redaction  # noqa: E402
+
+
+def _result_with_redactions(
+    redactions: list[_Redaction] | None = None,
+) -> _SynthesisResult:
+    base = _fake_result()
+    return _SynthesisResult(
+        markdown=base.markdown,
+        frontmatter=base.frontmatter,
+        frontmatter_complete=base.frontmatter_complete,
+        raw_response=base.raw_response,
+        prompt=base.prompt,
+        model=base.model,
+        cost_estimate_usd=base.cost_estimate_usd,
+        truncation_notes=list(base.truncation_notes),
+        redactions=list(redactions) if redactions else [],
+    )
+
+
+def test_synthesize_paranoid_flag_propagates(
+    fake_cli_env: tuple[Path, Path], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    projects, cwd = fake_cli_env
+    _install_fixture_session(projects, cwd)
+    _stub_git(monkeypatch)
+
+    captured: dict[str, object] = {}
+
+    def _synth(**kwargs: object) -> _SynthesisResult:
+        captured.update(kwargs)
+        return _fake_result()
+
+    monkeypatch.setattr("pr_narrator.cli.synthesize_pr_description", _synth)
+    runner = CliRunner()
+    result = runner.invoke(main, ["synthesize", "latest", "--paranoid"])
+    assert result.exit_code == 0, result.stderr
+    assert captured.get("paranoid") is True
+
+
+def test_synthesize_default_does_not_set_paranoid(
+    fake_cli_env: tuple[Path, Path], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    projects, cwd = fake_cli_env
+    _install_fixture_session(projects, cwd)
+    _stub_git(monkeypatch)
+
+    captured: dict[str, object] = {}
+
+    def _synth(**kwargs: object) -> _SynthesisResult:
+        captured.update(kwargs)
+        return _fake_result()
+
+    monkeypatch.setattr("pr_narrator.cli.synthesize_pr_description", _synth)
+    runner = CliRunner()
+    result = runner.invoke(main, ["synthesize", "latest"])
+    assert result.exit_code == 0, result.stderr
+    assert captured.get("paranoid") is False
+
+
+def test_debug_shows_redactions_block_when_redactions_present(
+    fake_cli_env: tuple[Path, Path], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    projects, cwd = fake_cli_env
+    _install_fixture_session(projects, cwd)
+    _stub_git(monkeypatch)
+
+    fake = _result_with_redactions(
+        [
+            _Redaction(
+                category="anthropic_api_key",
+                location="user_intent_chain[2]",
+                span=(10, 60),
+            ),
+            _Redaction(
+                category="aws_access_key",
+                location="diff:src/config.py:line 14",
+                span=(120, 140),
+            ),
+        ]
+    )
+    monkeypatch.setattr("pr_narrator.cli.synthesize_pr_description", lambda **_kw: fake)
+    runner = CliRunner()
+    result = runner.invoke(main, ["synthesize", "latest", "--debug"])
+    assert result.exit_code == 0, result.stderr
+    assert "REDACTIONS (2 applied)" in result.stderr
+    assert "anthropic_api_key in user_intent_chain[2]" in result.stderr
+    assert "aws_access_key in diff:src/config.py:line 14" in result.stderr
+    assert "@ bytes 10-60" in result.stderr
+
+
+def test_debug_omits_redactions_block_when_none(
+    fake_cli_env: tuple[Path, Path], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    projects, cwd = fake_cli_env
+    _install_fixture_session(projects, cwd)
+    _stub_git(monkeypatch)
+    monkeypatch.setattr(
+        "pr_narrator.cli.synthesize_pr_description", lambda **_kw: _fake_result()
+    )
+    runner = CliRunner()
+    result = runner.invoke(main, ["synthesize", "latest", "--debug"])
+    assert result.exit_code == 0, result.stderr
+    assert "REDACTIONS" not in result.stderr
+
+
+def test_create_paranoid_flag_propagates(
+    fake_cli_env: tuple[Path, Path], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    projects, cwd = fake_cli_env
+    _install_fixture_session(projects, cwd)
+    state = _stub_create_env(monkeypatch)
+
+    captured: dict[str, object] = {}
+
+    def _synth(**kwargs: object) -> _SynthesisResult:
+        captured.update(kwargs)
+        state["synth_called"] = True
+        return _fake_result()
+
+    monkeypatch.setattr("pr_narrator.cli.synthesize_pr_description", _synth)
+    runner = CliRunner()
+    result = runner.invoke(main, ["create", "latest", "--paranoid"])
+    assert result.exit_code == 0, result.stderr
+    assert captured.get("paranoid") is True
