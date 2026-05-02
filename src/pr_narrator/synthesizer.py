@@ -15,9 +15,10 @@ from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
 
-from pr_narrator.compressor import CompressedTranscript
+from pr_narrator.compressor import CompressedEntry, CompressedTranscript
 from pr_narrator.errors import ClaudeBinaryNotFoundError, SynthesisError
-from pr_narrator.prompts import SYSTEM_PROMPT, render_user_prompt
+from pr_narrator.prompts import SYSTEM_PROMPT, parse_diff_into_files, render_user_prompt
+from pr_narrator.redactor import Redaction, redact
 
 CHANGE_TYPE_ENUM = frozenset({"feat", "fix", "refactor", "chore", "docs", "test", "ci", "perf"})
 RISK_LEVEL_ENUM = frozenset({"low", "medium", "high"})
@@ -59,6 +60,7 @@ class SynthesisResult:
     model: str
     cost_estimate_usd: Decimal | None
     truncation_notes: list[str] = field(default_factory=list)
+    redactions: list[Redaction] = field(default_factory=list)
     synthesized_at: datetime = field(default_factory=lambda: datetime.now(UTC))
 
     def to_dict(self) -> dict[str, Any]:
@@ -74,6 +76,14 @@ class SynthesisResult:
             if self.cost_estimate_usd is not None
             else None,
             "truncation_notes": list(self.truncation_notes),
+            "redactions": [
+                {
+                    "category": r.category,
+                    "location": r.location,
+                    "span": [r.span[0], r.span[1]],
+                }
+                for r in self.redactions
+            ],
             "synthesized_at": self.synthesized_at.isoformat(),
         }
 
@@ -160,6 +170,63 @@ def _split_response(text: str) -> tuple[dict[str, str] | None, str]:
     return _parse_frontmatter_block(block), body
 
 
+def _redact_inputs(
+    compressed: CompressedTranscript,
+    diff: str,
+    paranoid: bool,
+) -> tuple[CompressedTranscript, str, list[Redaction]]:
+    """Redact transcript fragments and the diff before prompt rendering.
+
+    Each fragment is redacted individually so locations can be attributed.
+    The diff is split per-file so the location prefix names the file.
+    """
+    redactions: list[Redaction] = []
+
+    redacted_intents: list[str] = []
+    for i, intent in enumerate(compressed.user_intent_chain):
+        rr = redact(intent, location_prefix=f"user_intent_chain[{i}]", paranoid=paranoid)
+        redactions.extend(rr.redactions)
+        redacted_intents.append(rr.text)
+
+    redacted_timeline: list[CompressedEntry] = []
+    for i, entry in enumerate(compressed.timeline):
+        rr = redact(entry.text, location_prefix=f"timeline[{i}]", paranoid=paranoid)
+        redactions.extend(rr.redactions)
+        redacted_timeline.append(
+            CompressedEntry(
+                timestamp_offset=entry.timestamp_offset,
+                kind=entry.kind,
+                text=rr.text,
+            )
+        )
+
+    new_compressed = CompressedTranscript(
+        timeline=redacted_timeline,
+        tool_call_summary=compressed.tool_call_summary,
+        user_intent_chain=redacted_intents,
+        duration_seconds=compressed.duration_seconds,
+        meta=compressed.meta,
+    )
+
+    if not diff:
+        return new_compressed, diff, redactions
+
+    diff_blocks = parse_diff_into_files(diff)
+    if diff_blocks:
+        redacted_parts: list[str] = []
+        for path, hunk in diff_blocks:
+            rr = redact(hunk, location_prefix=f"diff:{path}", paranoid=paranoid)
+            redactions.extend(rr.redactions)
+            redacted_parts.append(rr.text)
+        redacted_diff = "\n".join(redacted_parts)
+    else:
+        rr = redact(diff, location_prefix="diff", paranoid=paranoid)
+        redactions.extend(rr.redactions)
+        redacted_diff = rr.text
+
+    return new_compressed, redacted_diff, redactions
+
+
 def synthesize_pr_description(
     compressed: CompressedTranscript,
     diff: str,
@@ -170,15 +237,26 @@ def synthesize_pr_description(
     model: str = "sonnet",
     timeout_seconds: int = 120,
     strict: bool = False,
+    paranoid: bool = False,
 ) -> SynthesisResult:
     """Render prompt, invoke `claude -p`, parse response into SynthesisResult."""
+    redacted_compressed, redacted_diff, input_redactions = _redact_inputs(
+        compressed, diff, paranoid
+    )
+
     user_prompt, truncation_notes = render_user_prompt(
-        compressed=compressed,
-        diff=diff,
+        compressed=redacted_compressed,
+        diff=redacted_diff,
         changed_files=changed_files,
         commit_messages=commit_messages,
         branch=branch,
     )
+
+    if input_redactions:
+        cats = sorted({r.category for r in input_redactions})
+        truncation_notes.append(
+            f"Redacted {len(input_redactions)} items: {', '.join(cats)}"
+        )
 
     argv = [
         claude_binary,
@@ -233,6 +311,10 @@ def synthesize_pr_description(
     if not isinstance(result_text, str) or not result_text.strip():
         raise SynthesisError(f"claude -p response missing or empty `result`: {raw_response[:200]}")
 
+    output_rr = redact(result_text, location_prefix="output", paranoid=paranoid)
+    result_text = output_rr.text
+    all_redactions = list(input_redactions) + list(output_rr.redactions)
+
     raw_frontmatter, body = _split_response(result_text)
     if raw_frontmatter is None:
         frontmatter: dict[str, Any] | None = None
@@ -263,4 +345,5 @@ def synthesize_pr_description(
         model=response_model,
         cost_estimate_usd=cost,
         truncation_notes=list(truncation_notes),
+        redactions=all_redactions,
     )

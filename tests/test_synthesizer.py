@@ -11,6 +11,7 @@ import pytest
 
 from pr_narrator.compressor import CompressedEntry, CompressedTranscript
 from pr_narrator.errors import ClaudeBinaryNotFoundError, SynthesisError
+from pr_narrator.redactor import Redaction
 from pr_narrator.synthesizer import (
     SynthesisResult,
     synthesize_pr_description,
@@ -565,3 +566,236 @@ def test_response_model_falls_back_to_request_model() -> None:
             model="opus",
         )
     assert result.model == "opus"
+
+
+# ---------------------------------------------------------------------------
+# Redaction integration
+# ---------------------------------------------------------------------------
+
+
+_SECRET = "sk-ant-" + "A" * 60
+
+
+def _compressed_with_secret() -> CompressedTranscript:
+    return CompressedTranscript(
+        timeline=[
+            CompressedEntry(timestamp_offset=0, kind="user", text="hi"),
+            CompressedEntry(
+                timestamp_offset=10, kind="user", text=f"the key is {_SECRET}"
+            ),
+        ],
+        tool_call_summary={"Edit": 1},
+        user_intent_chain=["hi", f"the key is {_SECRET}"],
+        duration_seconds=10,
+        meta={},
+    )
+
+
+def test_input_redaction_strips_secret_before_prompt() -> None:
+    diff_with_secret = (
+        "diff --git a/.env b/.env\n"
+        "--- a/.env\n"
+        "+++ b/.env\n"
+        "@@ -1 +1 @@\n"
+        f"+API_KEY={_SECRET}\n"
+    )
+    with patch(
+        "pr_narrator.synthesizer.subprocess.run",
+        return_value=_make_completed(stdout=_valid_response()),
+    ) as mock_run:
+        result = synthesize_pr_description(
+            compressed=_compressed_with_secret(),
+            diff=diff_with_secret,
+            changed_files=[".env"],
+            commit_messages=["feat: x"],
+            branch="feat/x",
+        )
+
+    sent_input = mock_run.call_args.kwargs["input"]
+    assert _SECRET not in sent_input
+    assert "[REDACTED:anthropic_api_key]" in sent_input
+    cats = {r.category for r in result.redactions}
+    assert "anthropic_api_key" in cats
+    # Both the user_intent_chain hit and the diff hit should be reported.
+    locs = [r.location for r in result.redactions]
+    assert any(loc.startswith("user_intent_chain[") for loc in locs)
+    assert any(loc.startswith("diff:.env") for loc in locs)
+
+
+def test_redactions_serialized_in_to_dict() -> None:
+    with patch(
+        "pr_narrator.synthesizer.subprocess.run",
+        return_value=_make_completed(stdout=_valid_response()),
+    ):
+        result = synthesize_pr_description(
+            compressed=_compressed_with_secret(),
+            diff="",
+            changed_files=[],
+            commit_messages=[],
+            branch="b",
+        )
+    d = result.to_dict()
+    assert isinstance(d["redactions"], list)
+    assert d["redactions"]
+    sample = d["redactions"][0]
+    assert {"category", "location", "span"} <= set(sample.keys())
+    assert isinstance(sample["span"], list)
+    assert len(sample["span"]) == 2
+    # Round-trips through JSON.
+    rehydrated = json.loads(json.dumps(d))
+    assert rehydrated["redactions"][0]["category"] == sample["category"]
+
+
+def test_truncation_note_records_redactions() -> None:
+    with patch(
+        "pr_narrator.synthesizer.subprocess.run",
+        return_value=_make_completed(stdout=_valid_response()),
+    ):
+        result = synthesize_pr_description(
+            compressed=_compressed_with_secret(),
+            diff="",
+            changed_files=[],
+            commit_messages=[],
+            branch="b",
+        )
+    notes = " ".join(result.truncation_notes)
+    assert "Redacted" in notes
+    assert "anthropic_api_key" in notes
+
+
+def test_no_redactions_means_empty_list_and_no_note() -> None:
+    """Clean input doesn't add a redaction note."""
+    with patch(
+        "pr_narrator.synthesizer.subprocess.run",
+        return_value=_make_completed(stdout=_valid_response()),
+    ):
+        result = synthesize_pr_description(
+            compressed=_compressed(),
+            diff="",
+            changed_files=[],
+            commit_messages=[],
+            branch="b",
+        )
+    assert result.redactions == []
+    assert all("Redacted" not in n for n in result.truncation_notes)
+
+
+def test_output_redaction_catches_llm_regurgitated_secret() -> None:
+    leaked = "sk-ant-" + "B" * 60
+    body = (
+        "<!-- pr-narrator-meta\n"
+        "change_type: feat\nrisk_level: low\n-->\n"
+        f"## leaked\nthe key was {leaked}\n"
+    )
+    with patch(
+        "pr_narrator.synthesizer.subprocess.run",
+        return_value=_make_completed(stdout=json.dumps({"result": body})),
+    ):
+        result = synthesize_pr_description(
+            compressed=_compressed(),
+            diff="",
+            changed_files=[],
+            commit_messages=[],
+            branch="b",
+        )
+    assert leaked not in result.markdown
+    assert "[REDACTED:anthropic_api_key]" in result.markdown
+    assert any(
+        r.location.startswith("output") and r.category == "anthropic_api_key"
+        for r in result.redactions
+    )
+
+
+def test_paranoid_flag_enables_paranoid_patterns_in_input() -> None:
+    transcript = CompressedTranscript(
+        timeline=[
+            CompressedEntry(
+                timestamp_offset=0,
+                kind="user",
+                text="working in /Users/alice/work/repo",
+            )
+        ],
+        tool_call_summary={},
+        user_intent_chain=["working in /Users/alice/work/repo"],
+        duration_seconds=0,
+        meta={},
+    )
+
+    with patch(
+        "pr_narrator.synthesizer.subprocess.run",
+        return_value=_make_completed(stdout=_valid_response()),
+    ) as mock_run:
+        result = synthesize_pr_description(
+            compressed=transcript,
+            diff="",
+            changed_files=[],
+            commit_messages=[],
+            branch="b",
+            paranoid=True,
+        )
+    sent = mock_run.call_args.kwargs["input"]
+    assert "/Users/alice/" not in sent
+    assert any(r.category == "home_path_macos" for r in result.redactions)
+
+
+def test_paranoid_off_does_not_redact_home_paths() -> None:
+    transcript = CompressedTranscript(
+        timeline=[],
+        tool_call_summary={},
+        user_intent_chain=["working in /Users/alice/work/repo"],
+        duration_seconds=0,
+        meta={},
+    )
+    with patch(
+        "pr_narrator.synthesizer.subprocess.run",
+        return_value=_make_completed(stdout=_valid_response()),
+    ) as mock_run:
+        synthesize_pr_description(
+            compressed=transcript,
+            diff="",
+            changed_files=[],
+            commit_messages=[],
+            branch="b",
+        )
+    sent = mock_run.call_args.kwargs["input"]
+    assert "/Users/alice/work/repo" in sent
+
+
+def test_diff_with_no_parseable_blocks_falls_through_to_whole_blob_redaction() -> None:
+    """A non-empty diff whose split yields no usable file blocks (e.g.
+    whitespace only) falls through to whole-blob redaction. Covers the
+    defensive branch in _redact_inputs.
+    """
+    diff_blob = "   \n   \n"  # truthy but parse_diff_into_files returns []
+    with patch(
+        "pr_narrator.synthesizer.subprocess.run",
+        return_value=_make_completed(stdout=_valid_response()),
+    ) as mock_run:
+        result = synthesize_pr_description(
+            compressed=_compressed(),
+            diff=diff_blob,
+            changed_files=[],
+            commit_messages=[],
+            branch="b",
+        )
+    sent = mock_run.call_args.kwargs["input"]
+    assert isinstance(sent, str)
+    # Nothing to redact, but the else branch executed without error.
+    assert all(not r.location.startswith("diff:") for r in result.redactions)
+
+
+def test_redactions_field_default_is_empty_list() -> None:
+    """The Redaction dataclass field defaults to an empty list, not None."""
+    result = SynthesisResult(
+        markdown="x",
+        frontmatter=None,
+        frontmatter_complete=False,
+        raw_response="",
+        prompt="",
+        model="sonnet",
+        cost_estimate_usd=None,
+    )
+    assert result.redactions == []
+    # Sanity: the type carries through to_dict.
+    assert result.to_dict()["redactions"] == []
+    _ = Redaction  # imported for type-check; used in cli tests too.
