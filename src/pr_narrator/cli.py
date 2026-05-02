@@ -185,28 +185,52 @@ def _strip_frontmatter(markdown: str) -> str:
 
 _CONVENTIONAL_PREFIX = re.compile(r"^(\w+)(\([^)]+\))?:\s*")
 
+_TITLE_SKIP_PATTERNS: tuple[re.Pattern[str], ...] = (
+    re.compile(r"^fixup!", re.IGNORECASE),
+    re.compile(r"^squash!", re.IGNORECASE),
+    re.compile(r"^style(\([^)]+\))?:", re.IGNORECASE),
+    re.compile(r"^docs(\([^)]+\))?:", re.IGNORECASE),
+    re.compile(r"^chore(\([^)]+\))?:.*format", re.IGNORECASE),
+    re.compile(r"^wip(\([^)]+\))?:", re.IGNORECASE),
+)
 
-def _build_pr_title(result: SynthesisResult, commit_messages: list[str]) -> str:
-    """Compose a PR title from synthesis frontmatter + most-recent commit subject.
 
-    Happy path: frontmatter has change_type and scope -> strip any leading
-    conventional-commit prefix from the most recent commit subject and
-    prepend f"{change_type}({scope}): ".
+def _is_skip_commit(subject: str) -> bool:
+    return any(p.search(subject) for p in _TITLE_SKIP_PATTERNS)
 
-    Fallback: use the most recent commit subject verbatim.
+
+def _pick_title_source(commit_messages: list[str]) -> str:
+    """Pick the best commit subject to seed the PR title.
+
+    `commit_messages` is the output of ``git log base..HEAD --pretty=format:%s``,
+    so it is newest-first: index 0 is the most recent commit, index -1 is the
+    oldest. Walk newest -> oldest and return the first subject that isn't a
+    fixup, squash, style/docs/wip commit, or a "chore: ... format ..." cleanup.
+    Fall back to the newest subject when every commit matches a skip pattern.
     """
-    # TODO: skip fixup!/squash!/style: commits when picking title source.
-    # For now we use the most recent commit verbatim and trust draft-mode
-    # review to catch awkward titles.
     if not commit_messages:
         return "(no commits on branch)"
-    latest = commit_messages[-1]
+    for subject in commit_messages:
+        if not _is_skip_commit(subject):
+            return subject
+    return commit_messages[0]
 
+
+def _build_pr_title(result: SynthesisResult, commit_messages: list[str]) -> str:
+    """Compose a PR title from synthesis frontmatter + best-fit commit subject.
+
+    Happy path: frontmatter has change_type and scope -> strip any leading
+    conventional-commit prefix from the chosen commit subject and prepend
+    f"{change_type}({scope}): ".
+
+    Fallback: use the chosen commit subject verbatim.
+    """
+    source = _pick_title_source(commit_messages)
     fm = result.frontmatter
     if result.frontmatter_complete and fm is not None and "change_type" in fm and "scope" in fm:
-        stripped = _CONVENTIONAL_PREFIX.sub("", latest).lstrip()
+        stripped = _CONVENTIONAL_PREFIX.sub("", source).lstrip()
         return f"{fm['change_type']}({fm['scope']}): {stripped}"
-    return latest
+    return source
 
 
 def _emit_debug(result: SynthesisResult) -> None:
