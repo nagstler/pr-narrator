@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import sys
 from collections import Counter
 from collections.abc import Callable
@@ -27,10 +28,19 @@ from pr_narrator.discovery import (
 from pr_narrator.errors import (
     AmbiguousMatchError,
     ClaudeBinaryNotFoundError,
+    GitHubCliNotFoundError,
     NotInGitRepoError,
+    PRCreationError,
+    PushFailedError,
     SessionNotFoundError,
     SynthesisError,
     UnknownBaseRefError,
+)
+from pr_narrator.github import (
+    create_pr,
+    get_remote_pr_for_branch,
+    is_branch_on_remote,
+    push_branch,
 )
 from pr_narrator.parser import (
     AssistantTurn,
@@ -173,6 +183,32 @@ def _strip_frontmatter(markdown: str) -> str:
     return after[close_idx + len(FRONTMATTER_CLOSE_LITERAL) :].lstrip("\n")
 
 
+_CONVENTIONAL_PREFIX = re.compile(r"^(\w+)(\([^)]+\))?:\s*")
+
+
+def _build_pr_title(result: SynthesisResult, commit_messages: list[str]) -> str:
+    """Compose a PR title from synthesis frontmatter + most-recent commit subject.
+
+    Happy path: frontmatter has change_type and scope -> strip any leading
+    conventional-commit prefix from the most recent commit subject and
+    prepend f"{change_type}({scope}): ".
+
+    Fallback: use the most recent commit subject verbatim.
+    """
+    # TODO: skip fixup!/squash!/style: commits when picking title source.
+    # For now we use the most recent commit verbatim and trust draft-mode
+    # review to catch awkward titles.
+    if not commit_messages:
+        return "(no commits on branch)"
+    latest = commit_messages[-1]
+
+    fm = result.frontmatter
+    if result.frontmatter_complete and fm is not None and "change_type" in fm and "scope" in fm:
+        stripped = _CONVENTIONAL_PREFIX.sub("", latest).lstrip()
+        return f"{fm['change_type']}({fm['scope']}): {stripped}"
+    return latest
+
+
 def _emit_debug(result: SynthesisResult) -> None:
     prompt = result.prompt
     sys_prompt, _, user_prompt = prompt.partition("\n---\n")
@@ -296,3 +332,204 @@ def synthesize_from(
         click.echo(f"Error: {exc}", err=True)
         sys.exit(1)
     _run_synthesize(meta, base, model, no_frontmatter, debug, strict)
+
+
+# ---------------------------------------------------------------------------
+# create command
+# ---------------------------------------------------------------------------
+
+
+@main.group()
+def create() -> None:
+    """Synthesize a PR description and post it via the gh CLI."""
+
+
+def _common_create_options(func: F) -> F:
+    func = click.option(
+        "--force-new",
+        is_flag=True,
+        help="Create a new PR even if one already exists for this branch",
+    )(func)
+    func = click.option(
+        "--no-create-on-closed",
+        is_flag=True,
+        help="When a closed (not merged) PR exists, exit 0 instead of creating a new one",
+    )(func)
+    func = click.option(
+        "--dry-run",
+        is_flag=True,
+        help="Synthesize and print, do not push or create a PR",
+    )(func)
+    func = click.option("--no-draft", is_flag=True, help="Create as a regular PR, not draft")(func)
+    func = click.option("--strict", is_flag=True, help="Fail on any frontmatter validation issue")(
+        func
+    )
+    func = click.option(
+        "--no-frontmatter", is_flag=True, help="Strip the HTML comment frontmatter"
+    )(func)
+    func = click.option("--model", default="sonnet", show_default=True, help="Claude model to use")(
+        func
+    )
+    func = click.option("--base", default="main", show_default=True, help="Base branch for the PR")(
+        func
+    )
+    return func
+
+
+def _run_create(
+    meta: SessionMeta,
+    base: str,
+    model: str,
+    no_frontmatter: bool,
+    strict: bool,
+    no_draft: bool,
+    dry_run: bool,
+    no_create_on_closed: bool,
+    force_new: bool,
+) -> None:
+    try:
+        branch = get_current_branch()
+    except NotInGitRepoError as exc:
+        click.echo(f"Error: {exc}", err=True)
+        sys.exit(1)
+
+    if branch == base:
+        click.echo(f"Currently on `{base}`. Switch to a feature branch first.", err=True)
+        sys.exit(1)
+
+    if not force_new:
+        try:
+            existing = get_remote_pr_for_branch(branch)
+        except (GitHubCliNotFoundError, PRCreationError) as exc:
+            click.echo(f"Error: {exc}", err=True)
+            sys.exit(1)
+        if existing is not None:
+            if existing.state == "OPEN":
+                click.echo(existing.url)
+                return
+            if existing.state == "MERGED":
+                click.echo(
+                    f"Error: PR for this branch was already merged ({existing.url}). "
+                    "Use a new branch.",
+                    err=True,
+                )
+                sys.exit(1)
+            if existing.state == "CLOSED" and no_create_on_closed:
+                click.echo(existing.url)
+                click.echo(
+                    f"Closed PR exists; not creating a new one ({existing.url}).",
+                    err=True,
+                )
+                return
+
+    try:
+        events = list(parse_session(meta.path))
+        compressed = compress(events)
+        diff = get_branch_diff(base=base)
+        changed_files = get_changed_files(base=base)
+        commit_messages = get_commit_messages(base=base)
+    except (NotInGitRepoError, UnknownBaseRefError) as exc:
+        click.echo(f"Error: {exc}", err=True)
+        sys.exit(1)
+
+    try:
+        result = synthesize_pr_description(
+            compressed=compressed,
+            diff=diff,
+            changed_files=changed_files,
+            commit_messages=commit_messages,
+            branch=branch,
+            model=model,
+            strict=strict,
+        )
+    except (ClaudeBinaryNotFoundError, SynthesisError) as exc:
+        click.echo(f"Error: {exc}", err=True)
+        sys.exit(1)
+
+    body = _strip_frontmatter(result.markdown) if no_frontmatter else result.markdown
+
+    if dry_run:
+        click.echo(body)
+        return
+
+    if not is_branch_on_remote(branch):
+        click.echo(f"Pushing branch {branch} to origin...", err=True)
+        try:
+            push_branch(branch)
+        except PushFailedError as exc:
+            click.echo(f"Error: {exc}", err=True)
+            sys.exit(1)
+
+    title = _build_pr_title(result, commit_messages)
+
+    try:
+        url = create_pr(title=title, body=body, base=base, draft=not no_draft)
+    except (GitHubCliNotFoundError, PRCreationError) as exc:
+        click.echo(f"Error: {exc}", err=True)
+        sys.exit(1)
+
+    click.echo(url)
+    click.echo(f"Opened PR: {url}", err=True)
+
+
+@create.command("latest")
+@_common_create_options
+def create_latest(
+    base: str,
+    model: str,
+    no_frontmatter: bool,
+    strict: bool,
+    no_draft: bool,
+    dry_run: bool,
+    no_create_on_closed: bool,
+    force_new: bool,
+) -> None:
+    """Create a PR from the most recent session."""
+    meta = find_latest_session()
+    if meta is None:
+        click.echo("No Claude Code sessions found for this directory.", err=True)
+        sys.exit(1)
+    _run_create(
+        meta,
+        base,
+        model,
+        no_frontmatter,
+        strict,
+        no_draft,
+        dry_run,
+        no_create_on_closed,
+        force_new,
+    )
+
+
+@create.command("from")
+@click.argument("session_id")
+@_common_create_options
+def create_from(
+    session_id: str,
+    base: str,
+    model: str,
+    no_frontmatter: bool,
+    strict: bool,
+    no_draft: bool,
+    dry_run: bool,
+    no_create_on_closed: bool,
+    force_new: bool,
+) -> None:
+    """Create a PR from the session matching the given UUID prefix."""
+    try:
+        meta = find_session_by_id(session_id)
+    except (SessionNotFoundError, AmbiguousMatchError) as exc:
+        click.echo(f"Error: {exc}", err=True)
+        sys.exit(1)
+    _run_create(
+        meta,
+        base,
+        model,
+        no_frontmatter,
+        strict,
+        no_draft,
+        dry_run,
+        no_create_on_closed,
+        force_new,
+    )
