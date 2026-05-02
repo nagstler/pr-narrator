@@ -8,6 +8,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- `pr-narrator create [latest|from <ID>]` command — synthesizes a
+  PR description and posts it as a draft GitHub PR via `gh`. Flags:
+  `--base`, `--model`, `--no-draft`, `--no-frontmatter`, `--strict`,
+  `--dry-run`, `--no-create-on-closed`, `--force-new`. Title is
+  built from synthesis frontmatter (`{change_type}({scope}): {most
+  recent commit subject, conventional-prefix stripped}`), with the
+  most-recent commit subject verbatim as a fallback when
+  frontmatter is incomplete. Stdout carries only the PR URL on
+  success so `pr-narrator create latest | xargs open` works.
+- Auto-push to `origin` when the branch isn't yet on remote, with
+  a clear stderr "Pushing branch X to origin..." message.
+- Existing-PR detection: skip creation if an OPEN PR exists for
+  the branch (prints its URL), refuse if a MERGED PR exists, and
+  default to creating a new PR for CLOSED ones (overridable with
+  `--no-create-on-closed`). `--force-new` bypasses the check.
+- `pr_narrator.github` module wrapping `gh pr list`, `gh pr create`,
+  `git push`, and `git ls-remote` via subprocess. New errors:
+  `GitHubCliNotFoundError`, `PushFailedError`, `PRCreationError`.
 - Transcript compressor (`pr_narrator.compressor`): deterministic,
   rule-based compression of parsed session events into a
   `CompressedTranscript` (timeline of user / decision / tool_burst /
