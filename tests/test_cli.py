@@ -1054,3 +1054,82 @@ def test_build_pr_title_uses_newest_commit_with_complete_frontmatter() -> None:
     )
     msgs = ["feat: newest change", "feat: oldest change"]  # git log order
     assert _build_pr_title(result, msgs) == "feat(cli): newest change"
+
+
+# ---------------------------------------------------------------------------
+# change_type-aware picker tests
+# ---------------------------------------------------------------------------
+
+
+def test_pick_title_source_with_change_type_docs_does_not_skip_docs_commits() -> None:
+    """Docs PRs should source their title from a docs commit, not a stray fix."""
+    msgs = [
+        "docs(readme): correct dry-run example",
+        "docs: rewrite README",
+        "fix(cli): unrelated small fix",
+    ]
+    assert _pick_title_source(msgs, change_type="docs") == "docs(readme): correct dry-run example"
+
+
+def test_pick_title_source_with_change_type_docs_still_skips_style_and_fixup() -> None:
+    msgs = [
+        "fixup! something",
+        "style: ruff format",
+        "docs(readme): real change",
+    ]
+    assert _pick_title_source(msgs, change_type="docs") == "docs(readme): real change"
+
+
+def test_pick_title_source_with_change_type_style_does_not_skip_style_commits() -> None:
+    msgs = [
+        "style(ui): align headers",
+        "docs: update faq",
+    ]
+    assert _pick_title_source(msgs, change_type="style") == "style(ui): align headers"
+
+
+def test_pick_title_source_with_change_type_wip_does_not_skip_wip_commits() -> None:
+    msgs = [
+        "wip(api): partial endpoint",
+        "docs: notes",
+    ]
+    assert _pick_title_source(msgs, change_type="wip") == "wip(api): partial endpoint"
+
+
+def test_pick_title_source_with_change_type_feat_behaves_like_no_hint() -> None:
+    msgs = [
+        "docs: tweak",
+        "feat(cli): add flag",
+    ]
+    # change_type='feat' isn't a skip category, so behavior is identical to None.
+    assert _pick_title_source(msgs, change_type="feat") == "feat(cli): add flag"
+    assert _pick_title_source(msgs) == "feat(cli): add flag"
+
+
+def test_pick_title_source_with_change_type_none_is_default_behavior() -> None:
+    msgs = ["docs: x", "feat: y"]
+    assert _pick_title_source(msgs, change_type=None) == "feat: y"
+
+
+def test_build_pr_title_threads_change_type_into_picker() -> None:
+    """Regression: docs-heavy PRs must not borrow titles from a stray fix commit."""
+    from pr_narrator.cli import _build_pr_title
+    from pr_narrator.synthesizer import SynthesisResult
+
+    result = SynthesisResult(
+        markdown="body",
+        frontmatter={"change_type": "docs", "scope": "readme", "risk_level": "low"},
+        frontmatter_complete=True,
+        raw_response="{}",
+        prompt="p",
+        model="claude-opus",
+        cost_estimate_usd=None,
+        truncation_notes=[],
+    )
+    msgs = [
+        "docs(readme): rewrite README for v0.1",
+        "docs: update CHANGELOG",
+        "fix(cli): unrelated",
+    ]
+    # Without change_type-awareness this would be 'docs(readme): unrelated'.
+    assert _build_pr_title(result, msgs) == "docs(readme): rewrite README for v0.1"
