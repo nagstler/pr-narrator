@@ -240,6 +240,14 @@ def _emit_debug(result: SynthesisResult) -> None:
         click.echo(f"${result.cost_estimate_usd:.4f} ({result.model})", err=True)
     else:
         click.echo(f"(unknown) ({result.model})", err=True)
+    if result.redactions:
+        click.echo(f"=== REDACTIONS ({len(result.redactions)} applied) ===", err=True)
+        for r in result.redactions:
+            click.echo(
+                f"- {r.category} in {r.location} @ bytes {r.span[0]}-{r.span[1]}",
+                err=True,
+            )
+        click.echo("================================", err=True)
     click.echo("================================================", err=True)
 
 
@@ -250,6 +258,7 @@ def _run_synthesize(
     no_frontmatter: bool,
     debug: bool,
     strict: bool,
+    paranoid: bool,
 ) -> None:
     events = list(parse_session(meta.path))
     compressed = compress(events)
@@ -272,6 +281,7 @@ def _run_synthesize(
             branch=branch,
             model=model,
             strict=strict,
+            paranoid=paranoid,
         )
     except (ClaudeBinaryNotFoundError, SynthesisError) as exc:
         click.echo(f"Error: {exc}", err=True)
@@ -285,6 +295,15 @@ def _run_synthesize(
 
 
 def _common_synthesize_options(func: F) -> F:
+    func = click.option(
+        "--paranoid",
+        is_flag=True,
+        help=(
+            "Enable aggressive redaction (file paths, .env-shaped lines, "
+            "private IPs, emails, high-entropy strings). Default mode redacts "
+            "only high-confidence patterns."
+        ),
+    )(func)
     func = click.option("--strict", is_flag=True, help="Fail on any frontmatter validation issue")(
         func
     )
@@ -304,14 +323,19 @@ def _common_synthesize_options(func: F) -> F:
 @synthesize.command("latest")
 @_common_synthesize_options
 def synthesize_latest(
-    base: str, model: str, no_frontmatter: bool, debug: bool, strict: bool
+    base: str,
+    model: str,
+    no_frontmatter: bool,
+    debug: bool,
+    strict: bool,
+    paranoid: bool,
 ) -> None:
     """Synthesize a PR description for the most recent session."""
     meta = find_latest_session()
     if meta is None:
         click.echo("No Claude Code sessions found for this directory.", err=True)
         sys.exit(1)
-    _run_synthesize(meta, base, model, no_frontmatter, debug, strict)
+    _run_synthesize(meta, base, model, no_frontmatter, debug, strict, paranoid)
 
 
 @synthesize.command("from")
@@ -324,6 +348,7 @@ def synthesize_from(
     no_frontmatter: bool,
     debug: bool,
     strict: bool,
+    paranoid: bool,
 ) -> None:
     """Synthesize a PR description for the session matching the given UUID prefix."""
     try:
@@ -331,7 +356,7 @@ def synthesize_from(
     except (SessionNotFoundError, AmbiguousMatchError) as exc:
         click.echo(f"Error: {exc}", err=True)
         sys.exit(1)
-    _run_synthesize(meta, base, model, no_frontmatter, debug, strict)
+    _run_synthesize(meta, base, model, no_frontmatter, debug, strict, paranoid)
 
 
 # ---------------------------------------------------------------------------
@@ -345,6 +370,14 @@ def create() -> None:
 
 
 def _common_create_options(func: F) -> F:
+    func = click.option(
+        "--paranoid",
+        is_flag=True,
+        help=(
+            "Enable aggressive redaction (file paths, .env-shaped lines, "
+            "private IPs, emails, high-entropy strings)."
+        ),
+    )(func)
     func = click.option(
         "--force-new",
         is_flag=True,
@@ -386,6 +419,7 @@ def _run_create(
     dry_run: bool,
     no_create_on_closed: bool,
     force_new: bool,
+    paranoid: bool,
 ) -> None:
     try:
         branch = get_current_branch()
@@ -441,6 +475,7 @@ def _run_create(
             branch=branch,
             model=model,
             strict=strict,
+            paranoid=paranoid,
         )
     except (ClaudeBinaryNotFoundError, SynthesisError) as exc:
         click.echo(f"Error: {exc}", err=True)
@@ -483,6 +518,7 @@ def create_latest(
     dry_run: bool,
     no_create_on_closed: bool,
     force_new: bool,
+    paranoid: bool,
 ) -> None:
     """Create a PR from the most recent session."""
     meta = find_latest_session()
@@ -499,6 +535,7 @@ def create_latest(
         dry_run,
         no_create_on_closed,
         force_new,
+        paranoid,
     )
 
 
@@ -515,6 +552,7 @@ def create_from(
     dry_run: bool,
     no_create_on_closed: bool,
     force_new: bool,
+    paranoid: bool,
 ) -> None:
     """Create a PR from the session matching the given UUID prefix."""
     try:
@@ -532,4 +570,5 @@ def create_from(
         dry_run,
         no_create_on_closed,
         force_new,
+        paranoid,
     )

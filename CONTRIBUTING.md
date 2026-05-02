@@ -90,3 +90,46 @@ uv run mypy src/
 # Run the CLI
 uv run pr-narrator
 ```
+
+## Security model
+
+pr-narrator pipes session transcripts and git diffs through
+`claude -p`, then optionally posts the result as a public PR
+description. Both inputs commonly contain secrets in real life:
+pasted API keys, command output dumping environment variables,
+JWTs in error messages, `.env` files shown via Read, hardcoded
+credentials in early-development code, internal hostnames in
+config. We mitigate this with two layers of redaction:
+
+**Default (always-on) — high-confidence patterns.** Anthropic,
+OpenAI, AWS, GitHub (classic and fine-grained), Slack, and Stripe
+API keys; 3-segment JSON Web Tokens; database connection strings
+with embedded credentials (`postgres://`, `mysql://`, `mongodb://`,
+`redis://`); PEM private-key headers; and `password=`/`secret=`/
+`api_key=`/`access_key=`/`auth_token=` assignments where the value
+is 16+ url-safe characters.
+
+**Opt-in (`--paranoid`) — aggressive patterns.** File paths under
+`/Users/` and `/home/`; `.env`-shaped uppercase assignments;
+private IPv4 addresses (RFC 1918 ranges only — public IPs are
+often intentional in code); email addresses; runs of 32+ url-safe
+characters that pass a Shannon-entropy threshold (~4.5 bits/char,
+which separates random tokens from English text and most code
+identifiers).
+
+**What we don't claim.** This is best-effort, not comprehensive
+secret detection. We don't run as a replacement for tools like
+[gitleaks](https://github.com/gitleaks/gitleaks) or
+[detect-secrets](https://github.com/Yelp/detect-secrets), and we
+don't promise zero false negatives. Novel key formats, unusual
+encodings, secrets embedded in prose, and credentials that look
+like ordinary identifiers will slip through. **Always review the
+synthesized output before publishing it.** This is why
+`pr-narrator create` defaults to draft PRs — drafts give you a
+review checkpoint before the description is visible to reviewers
+or webhook consumers.
+
+When redaction does fire, you'll see categorical placeholders like
+`[REDACTED:anthropic_api_key]` in the output; run with `--debug`
+to see a per-redaction listing on stderr (categories and locations
+only, never the secret value).

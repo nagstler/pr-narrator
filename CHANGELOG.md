@@ -8,6 +8,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Secret redaction layer (`pr_narrator.redactor`): scrubs API keys,
+  tokens, credentials, and connection strings from session
+  transcripts and diffs before they reach the LLM, with a
+  defense-in-depth output scan that re-redacts the model's response.
+  Conservative pattern set covers Anthropic, OpenAI, AWS, GitHub,
+  Slack, and Stripe keys, JWTs, database connection strings with
+  embedded credentials, PEM private-key headers, and generic
+  secret-shaped assignments. Redactions are reported on
+  `SynthesisResult.redactions` and serialized via `to_dict()`.
+- `--paranoid` flag on `synthesize` and `create` commands enables
+  aggressive redaction: file paths under `/Users/` and `/home/`,
+  `.env`-shaped uppercase assignments, RFC 1918 private IPv4
+  addresses, email addresses, and high-entropy 32+-char runs gated
+  by a Shannon-entropy check.
+- `--debug` now prints a `=== REDACTIONS (N applied) ===` block to
+  stderr listing each redaction's category, location, and byte span
+  (never the secret value). Block is omitted when no redactions
+  occurred.
 - `pr-narrator create [latest|from <ID>]` command — synthesizes a
   PR description and posts it as a draft GitHub PR via `gh`. Flags:
   `--base`, `--model`, `--no-draft`, `--no-frontmatter`, `--strict`,
