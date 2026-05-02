@@ -1,38 +1,122 @@
-# TODO: PyPI release on tag push — implemented in a later session.
-#
-# Planned design (not yet wired):
-#   on:
-#     push:
-#       tags: ["v*.*.*"]
-#   jobs:
-#     publish:
-#       runs-on: ubuntu-latest
-#       environment: pypi
-#       permissions:
-#         id-token: write   # trusted publishing (no API token)
-#       steps:
-#         - actions/checkout@v4
-#         - astral-sh/setup-uv@v3
-#         - uv build
-#         - pypa/gh-action-pypi-publish@release/v1
-#
-# This file exists now so future contributors see the intent. The
-# `workflow_dispatch` trigger below makes it a valid, registered workflow
-# that can only be invoked manually from the Actions tab — it is not yet
-# wired up to do anything useful.
-
 name: release
 
 on:
-  workflow_dispatch:
+  push:
+    tags:
+      - "v*.*.*"
 
 permissions:
   contents: read
 
 jobs:
-  noop:
-    name: placeholder (release not yet wired)
+  build:
+    name: build wheel + sdist
     runs-on: ubuntu-latest
     steps:
-      - name: Print stub message
-        run: echo "release.yml is a stub — see comment block at the top of the file."
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+
+      - name: Install Python 3.11
+        run: uv python install 3.11
+
+      - name: Build distributions
+        run: uv build
+
+      - name: Upload dist artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+          if-no-files-found: error
+          retention-days: 7
+
+  publish-pypi:
+    name: publish to PyPI (trusted publishing)
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/p/pr-narrator
+    permissions:
+      id-token: write
+    steps:
+      - name: Download dist artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+
+  github-release:
+    name: create GitHub Release
+    needs: publish-pypi
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Download dist artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+      - name: Resolve version from tag
+        id: version
+        run: |
+          tag="${GITHUB_REF_NAME}"
+          version="${tag#v}"
+          echo "tag=${tag}" >> "$GITHUB_OUTPUT"
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+
+      - name: Extract changelog section
+        id: changelog
+        run: |
+          version="${{ steps.version.outputs.version }}"
+          notes_file="$(mktemp)"
+          python - "$version" "$notes_file" <<'PY'
+          import sys, re, pathlib
+          version, out_path = sys.argv[1], sys.argv[2]
+          text = pathlib.Path("CHANGELOG.md").read_text(encoding="utf-8")
+          # Match a heading like `## [0.1.0] - 2026-05-01` and capture
+          # until the next `## [` heading or end of file.
+          pattern = re.compile(
+              rf"^##\s+\[{re.escape(version)}\][^\n]*\n(.*?)(?=^##\s+\[|\Z)",
+              re.MULTILINE | re.DOTALL,
+          )
+          m = pattern.search(text)
+          if not m:
+              print(f"::warning::no CHANGELOG section for {version}; using fallback notes")
+              fallback = (
+                  f"Release v{version}.\n\n"
+                  f"See [CHANGELOG.md](https://github.com/nagstler/pr-narrator/"
+                  f"blob/main/CHANGELOG.md) for details."
+              )
+              pathlib.Path(out_path).write_text(fallback, encoding="utf-8")
+              sys.exit(0)
+          body = m.group(1).strip() + "\n"
+          pathlib.Path(out_path).write_text(body, encoding="utf-8")
+          PY
+          echo "notes_file=${notes_file}" >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "${{ steps.version.outputs.tag }}" \
+            --title "${{ steps.version.outputs.tag }}" \
+            --notes-file "${{ steps.changelog.outputs.notes_file }}" \
+            dist/*.whl dist/*.tar.gz
