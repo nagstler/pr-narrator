@@ -8,6 +8,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Full README for the v0.1 release: positioning, audience-fit
+  guidance, runnable quick start, real synthesized / `--debug` /
+  `--dry-run` examples, security and limitations sections, status
+  badge cluster, and a banner image at `docs/assets/banner.png`.
+- `SECURITY.md` with the security disclosure policy: reporting
+  contact, in-scope / out-of-scope guidance, and coordinated
+  disclosure terms.
+- "Release process" section in `CONTRIBUTING.md` documenting SemVer
+  policy, the tag-driven release flow via `release.yml`, and the
+  `cz bump` workflow.
 - Secret redaction layer (`pr_narrator.redactor`): scrubs API keys,
   tokens, credentials, and connection strings from session
   transcripts and diffs before they reach the LLM, with a
@@ -97,5 +107,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   commits, PR rules, local dev with `uv`), one-line placeholder `README.md`.
 - GitHub templates: pull request template and YAML issue form templates for
   bug reports and feature requests.
+
+### Fixed
+- `pr-narrator create` now picks the PR title source from the most
+  recent non-noise commit, walking newest -> oldest and skipping
+  `fixup!`, `squash!`, `style:` / `style(...):`, `docs:` /
+  `docs(...):`, `chore: ... format ...`, and `wip:` / `wip(...):`
+  subjects (case-insensitive). Previously the title was seeded from
+  the oldest commit on the branch — an off-by-one in the original
+  `commit_messages[-1]` lookup, since `git log` returns commits
+  newest-first.
 
 [Unreleased]: https://github.com/nagstler/pr-narrator/compare/HEAD...HEAD
