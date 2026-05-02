@@ -136,26 +136,83 @@ only, never the secret value).
 
 ## Release process
 
+### Versioning policy
+
 We follow [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html).
-Pre-1.0, the public surface (CLI flags, output formats, exit codes,
-library API) may change between minor versions; we'll call out
-user-visible breaks in the `CHANGELOG`. Once we cut 1.0, breaking
-changes are reserved for major bumps.
 
-Releases are tag-driven. Pushing a tag of the form `v*.*.*` to `main`
-triggers `release.yml`, which builds the wheel and source distribution
-with `uv build`, then publishes them to PyPI via Trusted Publishing.
+- **Pre-1.0** (where we are now): the public surface — CLI flags,
+  output formats, exit codes, library API — may change between
+  minor versions. User-visible breaks are called out in
+  `CHANGELOG.md`.
+- **Post-1.0**: minor for new features, patch for fixes, major for
+  breaking changes. Breaking changes are reserved for major bumps.
 
-To cut a release:
+### How releases ship
+
+Releases are tag-driven. Pushing a tag of the form `v*.*.*`
+triggers [`release.yml`][rel], which:
+
+1. Builds the wheel and source distribution with `uv build`.
+2. Publishes both to PyPI via [Trusted Publishing][tp] — OIDC-bound
+   to this repo + workflow + environment, no API tokens stored
+   anywhere.
+3. Creates a GitHub Release with notes extracted from the matching
+   `CHANGELOG.md` section.
+
+[rel]: ../.github/workflows/release.yml
+[tp]: https://docs.pypi.org/trusted-publishers/
+
+The PyPI publish step runs inside a GitHub `pypi` environment that
+**requires manual approval** from a maintainer in the Actions UI,
+and the environment only accepts tag refs matching `v*.*.*`. A
+stray tag push will not auto-publish — the workflow will pause and
+wait for human approval.
+
+### Cutting a release
+
+The bump itself goes through a normal PR (main is protected: linear
+history, squash-merge, no direct pushes), then the tag is pushed
+from the squashed commit on main.
 
 ```bash
-# Update version + changelog from conventional commits since the last tag.
+# 1. From a release branch, bump the version. cz reads commit
+#    history since the last tag, picks a bump level, updates
+#    pyproject.toml, moves [Unreleased] under [X.Y.Z] in
+#    CHANGELOG.md, commits, and creates the vX.Y.Z tag locally.
+git checkout -b chore/release-vX.Y.Z
 uv run cz bump
 
-# Push the bump commit and the new tag.
-git push origin main --follow-tags
+# For the FIRST release after scaffolding (0.0.1 -> 0.1.0), force
+# a minor bump explicitly so cz doesn't pick patch:
+#   uv run cz bump --increment minor --yes
+
+# 2. Push the branch only -- NOT the tag yet.
+git push -u origin chore/release-vX.Y.Z
+
+# 3. Open the release PR (final dogfood: use pr-narrator itself).
+uv run pr-narrator create latest --no-draft
+# (Falls back to: gh pr create --base main --title "bump: ..." ...)
+
+# 4. After CI passes and the PR is squash-merged, sync main and
+#    re-tag from the squashed commit (the locally tagged SHA is
+#    different from the squashed one, so we re-tag here).
+git checkout main
+git pull origin main
+git log --oneline -1                         # confirm bump commit
+git tag vX.Y.Z -a -m "Release vX.Y.Z"        # or -s to sign
+git push origin vX.Y.Z
+
+# 5. Watch the workflow in the Actions tab. When publish-pypi
+#    pauses on the pypi environment, approve the deployment in
+#    the UI. PyPI publish runs, then GitHub Release is created.
+
+# 6. Verify: visit https://pypi.org/project/pr-narrator/X.Y.Z/,
+#    check the GitHub Release, and try a fresh install:
+#       uv tool install pr-narrator
+#       pr-narrator --version
 ```
 
-Don't edit `pyproject.toml`'s `version` field by hand — `cz bump` is
-the only supported way to change it. Don't push tags from a feature
-branch; releases come from `main` only.
+Don't edit `pyproject.toml`'s `version` field by hand — `cz bump`
+is the only supported way to change it. Don't push tags from a
+feature branch; tags come from `main` only, after the bump PR has
+merged.

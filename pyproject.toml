@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "pr-narrator"
-version = "0.0.1"
+version = "0.1.0"
 description = "Turn long Claude Code sessions into reviewer-ready pull request descriptions."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -80,4 +80,5 @@ skip_covered = false
 name = "cz_conventional_commits"
 version_provider = "pep621"
 tag_format = "v$version"
-update_changelog_on_bump = true
+update_changelog_on_bump = false
+bump_message = "chore: bump version $current_version → $new_version"
