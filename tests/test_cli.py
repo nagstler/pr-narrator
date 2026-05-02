@@ -414,3 +414,403 @@ def test_synthesize_from_uses_specific_session(
     result = runner.invoke(main, ["synthesize", "from", "abc12345"])
     assert result.exit_code == 0, result.stderr
     assert "## body" in result.stdout
+
+
+# ---------------------------------------------------------------------------
+# create command tests
+# ---------------------------------------------------------------------------
+
+from pr_narrator.github import PRInfo as _PRInfo  # noqa: E402
+
+
+def _stub_create_env(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    branch: str = "feat/x",
+    commit_messages: list[str] | None = None,
+    on_remote: bool = True,
+    existing_pr: _PRInfo | None = None,
+) -> dict[str, object]:
+    """Stub all the IO surfaces the create command touches."""
+    state: dict[str, object] = {
+        "pushed": False,
+        "created": None,
+        "synth_called": False,
+    }
+    monkeypatch.setattr("pr_narrator.cli.get_current_branch", lambda: branch)
+    monkeypatch.setattr("pr_narrator.cli.get_branch_diff", lambda base="main": "")
+    monkeypatch.setattr("pr_narrator.cli.get_changed_files", lambda base="main": [])
+    msgs = ["feat: x"] if commit_messages is None else commit_messages
+    monkeypatch.setattr("pr_narrator.cli.get_commit_messages", lambda base="main": msgs)
+    monkeypatch.setattr("pr_narrator.cli.get_remote_pr_for_branch", lambda b: existing_pr)
+    monkeypatch.setattr(
+        "pr_narrator.cli.is_branch_on_remote",
+        lambda b, remote="origin": on_remote,
+    )
+
+    def _push(b: str, remote: str = "origin") -> None:
+        state["pushed"] = True
+
+    monkeypatch.setattr("pr_narrator.cli.push_branch", _push)
+
+    def _create(title: str, body: str, base: str = "main", draft: bool = True) -> str:
+        state["created"] = {"title": title, "body": body, "base": base, "draft": draft}
+        return "https://github.com/x/y/pull/99"
+
+    monkeypatch.setattr("pr_narrator.cli.create_pr", _create)
+
+    def _synth(**_kw: object) -> _SynthesisResult:
+        state["synth_called"] = True
+        return _fake_result()
+
+    monkeypatch.setattr("pr_narrator.cli.synthesize_pr_description", _synth)
+    return state
+
+
+def test_create_on_main_exits_one(
+    fake_cli_env: tuple[Path, Path], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    projects, cwd = fake_cli_env
+    _install_fixture_session(projects, cwd)
+    _stub_create_env(monkeypatch, branch="main")
+    runner = CliRunner()
+    result = runner.invoke(main, ["create", "latest"])
+    assert result.exit_code == 1
+    assert "main" in result.stderr.lower()
+    assert "feature branch" in result.stderr
+
+
+def test_create_with_open_pr_prints_url_and_exits_zero(
+    fake_cli_env: tuple[Path, Path], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    projects, cwd = fake_cli_env
+    _install_fixture_session(projects, cwd)
+    state = _stub_create_env(
+        monkeypatch,
+        existing_pr=_PRInfo(number=42, state="OPEN", url="https://github.com/x/y/pull/42"),
+    )
+    runner = CliRunner()
+    result = runner.invoke(main, ["create", "latest"])
+    assert result.exit_code == 0, result.stderr
+    assert "https://github.com/x/y/pull/42" in result.stdout
+    assert state["synth_called"] is False
+    assert state["created"] is None
+
+
+def test_create_with_merged_pr_exits_one(
+    fake_cli_env: tuple[Path, Path], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    projects, cwd = fake_cli_env
+    _install_fixture_session(projects, cwd)
+    _stub_create_env(
+        monkeypatch,
+        existing_pr=_PRInfo(number=42, state="MERGED", url="https://github.com/x/y/pull/42"),
+    )
+    runner = CliRunner()
+    result = runner.invoke(main, ["create", "latest"])
+    assert result.exit_code == 1
+    assert "merged" in result.stderr.lower()
+
+
+def test_create_with_closed_pr_proceeds_to_make_new_pr(
+    fake_cli_env: tuple[Path, Path], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    projects, cwd = fake_cli_env
+    _install_fixture_session(projects, cwd)
+    state = _stub_create_env(
+        monkeypatch,
+        existing_pr=_PRInfo(number=42, state="CLOSED", url="https://github.com/x/y/pull/42"),
+    )
+    runner = CliRunner()
+    result = runner.invoke(main, ["create", "latest"])
+    assert result.exit_code == 0, result.stderr
+    assert state["created"] is not None
+
+
+def test_create_with_closed_pr_and_no_create_on_closed_exits_zero(
+    fake_cli_env: tuple[Path, Path], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    projects, cwd = fake_cli_env
+    _install_fixture_session(projects, cwd)
+    state = _stub_create_env(
+        monkeypatch,
+        existing_pr=_PRInfo(number=42, state="CLOSED", url="https://github.com/x/y/pull/42"),
+    )
+    runner = CliRunner()
+    result = runner.invoke(main, ["create", "latest", "--no-create-on-closed"])
+    assert result.exit_code == 0, result.stderr
+    assert state["created"] is None
+    assert "https://github.com/x/y/pull/42" in result.stdout
+
+
+def test_create_dry_run_does_not_push_or_create(
+    fake_cli_env: tuple[Path, Path], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    projects, cwd = fake_cli_env
+    _install_fixture_session(projects, cwd)
+    state = _stub_create_env(monkeypatch, on_remote=False)
+    runner = CliRunner()
+    result = runner.invoke(main, ["create", "latest", "--dry-run"])
+    assert result.exit_code == 0, result.stderr
+    assert state["pushed"] is False
+    assert state["created"] is None
+    assert state["synth_called"] is True
+    assert "## body" in result.stdout
+
+
+def test_create_auto_pushes_when_branch_not_on_remote(
+    fake_cli_env: tuple[Path, Path], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    projects, cwd = fake_cli_env
+    _install_fixture_session(projects, cwd)
+    state = _stub_create_env(monkeypatch, on_remote=False)
+    runner = CliRunner()
+    result = runner.invoke(main, ["create", "latest"])
+    assert result.exit_code == 0, result.stderr
+    assert state["pushed"] is True
+    assert "Pushing branch" in result.stderr
+
+
+def test_create_skips_push_when_branch_on_remote(
+    fake_cli_env: tuple[Path, Path], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    projects, cwd = fake_cli_env
+    _install_fixture_session(projects, cwd)
+    state = _stub_create_env(monkeypatch, on_remote=True)
+    runner = CliRunner()
+    result = runner.invoke(main, ["create", "latest"])
+    assert result.exit_code == 0, result.stderr
+    assert state["pushed"] is False
+
+
+def test_create_builds_title_from_frontmatter_when_complete(
+    fake_cli_env: tuple[Path, Path], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    projects, cwd = fake_cli_env
+    _install_fixture_session(projects, cwd)
+    state = _stub_create_env(monkeypatch, commit_messages=["feat: add create command"])
+
+    def _synth(**_kw: object) -> _SynthesisResult:
+        r = _fake_result()
+        return _SynthesisResult(
+            markdown=r.markdown,
+            frontmatter={
+                "change_type": "feat",
+                "scope": "cli",
+                "risk_level": "low",
+            },
+            frontmatter_complete=True,
+            raw_response=r.raw_response,
+            prompt=r.prompt,
+            model=r.model,
+            cost_estimate_usd=r.cost_estimate_usd,
+            truncation_notes=[],
+        )
+
+    monkeypatch.setattr("pr_narrator.cli.synthesize_pr_description", _synth)
+    runner = CliRunner()
+    result = runner.invoke(main, ["create", "latest"])
+    assert result.exit_code == 0, result.stderr
+    assert state["created"] is not None
+    assert state["created"]["title"] == "feat(cli): add create command"  # type: ignore[index]
+
+
+def test_create_falls_back_to_commit_subject_when_frontmatter_incomplete(
+    fake_cli_env: tuple[Path, Path], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    projects, cwd = fake_cli_env
+    _install_fixture_session(projects, cwd)
+    state = _stub_create_env(monkeypatch, commit_messages=["chore(deps): bump click to 8.1.7"])
+
+    def _synth(**_kw: object) -> _SynthesisResult:
+        r = _fake_result(complete=False)
+        return _SynthesisResult(
+            markdown=r.markdown,
+            frontmatter=None,
+            frontmatter_complete=False,
+            raw_response=r.raw_response,
+            prompt=r.prompt,
+            model=r.model,
+            cost_estimate_usd=r.cost_estimate_usd,
+            truncation_notes=[],
+        )
+
+    monkeypatch.setattr("pr_narrator.cli.synthesize_pr_description", _synth)
+    runner = CliRunner()
+    result = runner.invoke(main, ["create", "latest"])
+    assert result.exit_code == 0, result.stderr
+    assert state["created"] is not None
+    assert state["created"]["title"] == "chore(deps): bump click to 8.1.7"  # type: ignore[index]
+
+
+def test_create_no_draft_passes_draft_false(
+    fake_cli_env: tuple[Path, Path], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    projects, cwd = fake_cli_env
+    _install_fixture_session(projects, cwd)
+    state = _stub_create_env(monkeypatch)
+    runner = CliRunner()
+    result = runner.invoke(main, ["create", "latest", "--no-draft"])
+    assert result.exit_code == 0, result.stderr
+    assert state["created"] is not None
+    assert state["created"]["draft"] is False  # type: ignore[index]
+
+
+def test_create_force_new_bypasses_existing_pr_check(
+    fake_cli_env: tuple[Path, Path], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    projects, cwd = fake_cli_env
+    _install_fixture_session(projects, cwd)
+    state = _stub_create_env(
+        monkeypatch,
+        existing_pr=_PRInfo(number=42, state="OPEN", url="https://github.com/x/y/pull/42"),
+    )
+    runner = CliRunner()
+    result = runner.invoke(main, ["create", "latest", "--force-new"])
+    assert result.exit_code == 0, result.stderr
+    assert state["created"] is not None
+
+
+def test_create_no_session_found_exits_one(fake_cli_env: tuple[Path, Path]) -> None:
+    runner = CliRunner()
+    result = runner.invoke(main, ["create", "latest"])
+    assert result.exit_code == 1
+    assert "No Claude Code sessions" in result.stderr
+
+
+def test_create_from_no_match_exits_one(fake_cli_env: tuple[Path, Path]) -> None:
+    runner = CliRunner()
+    result = runner.invoke(main, ["create", "from", "deadbeef"])
+    assert result.exit_code == 1
+    assert "No Claude Code session" in result.stderr
+
+
+def test_create_not_in_git_repo_exits_one(
+    fake_cli_env: tuple[Path, Path], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    projects, cwd = fake_cli_env
+    _install_fixture_session(projects, cwd)
+
+    def _raise(*_a: object, **_kw: object) -> str:
+        raise NotInGitRepoError("not a git repo")
+
+    monkeypatch.setattr("pr_narrator.cli.get_current_branch", _raise)
+    runner = CliRunner()
+    result = runner.invoke(main, ["create", "latest"])
+    assert result.exit_code == 1
+    assert "not a git repo" in result.stderr
+
+
+def test_create_get_remote_pr_error_exits_one(
+    fake_cli_env: tuple[Path, Path], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    projects, cwd = fake_cli_env
+    _install_fixture_session(projects, cwd)
+    _stub_create_env(monkeypatch)
+    from pr_narrator.errors import PRCreationError as _PRCreationError
+
+    def _raise(_branch: str) -> _PRInfo | None:
+        raise _PRCreationError("gh pr list boom")
+
+    monkeypatch.setattr("pr_narrator.cli.get_remote_pr_for_branch", _raise)
+    runner = CliRunner()
+    result = runner.invoke(main, ["create", "latest"])
+    assert result.exit_code == 1
+    assert "gh pr list boom" in result.stderr
+
+
+def test_create_diff_failure_exits_one(
+    fake_cli_env: tuple[Path, Path], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from pr_narrator.errors import UnknownBaseRefError as _UnknownBaseRefError
+
+    projects, cwd = fake_cli_env
+    _install_fixture_session(projects, cwd)
+    _stub_create_env(monkeypatch)
+
+    def _raise(base: str = "main") -> str:
+        raise _UnknownBaseRefError("bad ref")
+
+    monkeypatch.setattr("pr_narrator.cli.get_branch_diff", _raise)
+    runner = CliRunner()
+    result = runner.invoke(main, ["create", "latest"])
+    assert result.exit_code == 1
+    assert "bad ref" in result.stderr
+
+
+def test_create_synthesis_error_exits_one(
+    fake_cli_env: tuple[Path, Path], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    projects, cwd = fake_cli_env
+    _install_fixture_session(projects, cwd)
+    _stub_create_env(monkeypatch)
+
+    def _raise(**_kw: object) -> _SynthesisResult:
+        raise _SynthesisError("synth boom")
+
+    monkeypatch.setattr("pr_narrator.cli.synthesize_pr_description", _raise)
+    runner = CliRunner()
+    result = runner.invoke(main, ["create", "latest"])
+    assert result.exit_code == 1
+    assert "synth boom" in result.stderr
+
+
+def test_create_push_failure_exits_one(
+    fake_cli_env: tuple[Path, Path], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    projects, cwd = fake_cli_env
+    _install_fixture_session(projects, cwd)
+    _stub_create_env(monkeypatch, on_remote=False)
+    from pr_narrator.errors import PushFailedError as _PushFailedError
+
+    def _raise(_b: str, remote: str = "origin") -> None:
+        raise _PushFailedError("push rejected")
+
+    monkeypatch.setattr("pr_narrator.cli.push_branch", _raise)
+    runner = CliRunner()
+    result = runner.invoke(main, ["create", "latest"])
+    assert result.exit_code == 1
+    assert "push rejected" in result.stderr
+
+
+def test_create_pr_creation_failure_exits_one(
+    fake_cli_env: tuple[Path, Path], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    projects, cwd = fake_cli_env
+    _install_fixture_session(projects, cwd)
+    _stub_create_env(monkeypatch)
+    from pr_narrator.errors import PRCreationError as _PRCreationError
+
+    def _raise(title: str, body: str, base: str = "main", draft: bool = True) -> str:
+        raise _PRCreationError("gh pr create boom")
+
+    monkeypatch.setattr("pr_narrator.cli.create_pr", _raise)
+    runner = CliRunner()
+    result = runner.invoke(main, ["create", "latest"])
+    assert result.exit_code == 1
+    assert "gh pr create boom" in result.stderr
+
+
+def test_create_from_uses_specific_session(
+    fake_cli_env: tuple[Path, Path], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    projects, cwd = fake_cli_env
+    _install_fixture_session(projects, cwd, session_id="abc12345-0000-0000-0000-000000000000")
+    state = _stub_create_env(monkeypatch)
+    runner = CliRunner()
+    result = runner.invoke(main, ["create", "from", "abc12345"])
+    assert result.exit_code == 0, result.stderr
+    assert state["created"] is not None
+
+
+def test_create_no_commits_uses_placeholder_title(
+    fake_cli_env: tuple[Path, Path], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    projects, cwd = fake_cli_env
+    _install_fixture_session(projects, cwd)
+    state = _stub_create_env(monkeypatch, commit_messages=[])
+    runner = CliRunner()
+    result = runner.invoke(main, ["create", "latest"])
+    assert result.exit_code == 0, result.stderr
+    assert state["created"] is not None
+    assert state["created"]["title"] == "(no commits on branch)"  # type: ignore[index]
