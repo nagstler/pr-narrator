@@ -134,6 +134,46 @@ PATTERNS: Final[tuple[Pattern, ...]] = (
         paranoid_only=False,
         description="Secret-shaped key/value assignment (value group only)",
     ),
+    Pattern(
+        name="env_assignment",
+        regex=re.compile(r"^[A-Z][A-Z0-9_]*=\S{8,}$", re.MULTILINE),
+        paranoid_only=True,
+        description=".env-shaped uppercase assignment",
+    ),
+    Pattern(
+        name="home_path_macos",
+        regex=re.compile(r"/Users/[a-zA-Z0-9._-]+/"),
+        paranoid_only=True,
+        description="macOS home directory path",
+    ),
+    Pattern(
+        name="home_path_linux",
+        regex=re.compile(r"/home/[a-zA-Z0-9._-]+/"),
+        paranoid_only=True,
+        description="Linux home directory path",
+    ),
+    Pattern(
+        name="email",
+        regex=re.compile(r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}"),
+        paranoid_only=True,
+        description="Email address",
+    ),
+    Pattern(
+        name="private_ipv4",
+        regex=re.compile(
+            r"\b(?:10(?:\.\d{1,3}){3}"
+            r"|172\.(?:1[6-9]|2\d|3[01])(?:\.\d{1,3}){2}"
+            r"|192\.168(?:\.\d{1,3}){2})\b"
+        ),
+        paranoid_only=True,
+        description="Private IPv4 address (RFC 1918 ranges only)",
+    ),
+    Pattern(
+        name="high_entropy",
+        regex=re.compile(r"[A-Za-z0-9_-]{32,}"),
+        paranoid_only=True,
+        description="High-entropy run of 32+ url-safe characters",
+    ),
 )
 
 

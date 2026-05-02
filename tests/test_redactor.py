@@ -36,7 +36,9 @@ def test_entropy_low_for_english() -> None:
 
 
 def test_entropy_high_for_random_token() -> None:
-    token = secrets.token_urlsafe(32)
+    # token_urlsafe(64) is empirically always >= 4.5 entropy across thousands
+    # of samples; (32) flakes ~0.5% of the time.
+    token = secrets.token_urlsafe(64)
     assert _shannon_entropy(token) >= 4.5
 
 
@@ -93,3 +95,62 @@ def test_conservative_pattern_does_not_false_positive(text: str) -> None:
         f"unexpected redactions {result.redactions} for {text!r}"
     )
     assert result.text == text
+
+
+_PARANOID_CATEGORIES = {
+    "high_entropy",
+    "env_assignment",
+    "home_path_macos",
+    "home_path_linux",
+    "email",
+    "private_ipv4",
+}
+
+
+@pytest.mark.parametrize(
+    ("text", "category"),
+    [
+        ("a high entropy " + secrets.token_urlsafe(64) + " trail", "high_entropy"),
+        ("API_TOKEN=Z9q83hd83js9fjs0\n", "env_assignment"),
+        ("/Users/alice/foo/bar", "home_path_macos"),
+        ("/home/alice/foo/bar", "home_path_linux"),
+        ("contact alice@example.com today", "email"),
+        ("server is at 192.168.1.10 today", "private_ipv4"),
+        ("server is at 10.0.0.5 today", "private_ipv4"),
+        ("server is at 172.16.5.10 today", "private_ipv4"),
+    ],
+)
+def test_paranoid_pattern_matches_only_when_enabled(
+    text: str, category: str
+) -> None:
+    off = redact(text, paranoid=False)
+    assert all(r.category != category for r in off.redactions)
+
+    on = redact(text, paranoid=True)
+    cats = {r.category for r in on.redactions}
+    assert category in cats, f"expected {category} in {cats} for {text!r}"
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "shortwordcount",
+        "FOO=bar",
+        "/Users",
+        "/home",
+        "not_an_email",
+        "server is at 8.8.8.8 today",
+        "version 1.2.3.4 is fine",
+    ],
+)
+def test_paranoid_negatives(text: str) -> None:
+    result = redact(text, paranoid=True)
+    assert all(
+        r.category not in _PARANOID_CATEGORIES for r in result.redactions
+    ), f"unexpected paranoid redaction: {result.redactions}"
+
+
+def test_high_entropy_skips_low_entropy_run() -> None:
+    text = "value=" + ("a" * 32)
+    result = redact(text, paranoid=True)
+    assert all(r.category != "high_entropy" for r in result.redactions)
