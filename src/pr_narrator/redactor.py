@@ -7,6 +7,7 @@ effort -- we catch high-blast-radius categories, not every possible secret.
 
 from __future__ import annotations
 
+import math
 import re
 from dataclasses import dataclass
 from typing import Final
@@ -34,6 +35,18 @@ class RedactionResult:
 
 
 PATTERNS: Final[tuple[Pattern, ...]] = ()
+
+
+def _shannon_entropy(s: str) -> float:
+    """Bits-per-character Shannon entropy. ~4.5 separates random tokens
+    from English words and most identifiers in practice."""
+    if not s:
+        return 0.0
+    freq: dict[str, int] = {}
+    for ch in s:
+        freq[ch] = freq.get(ch, 0) + 1
+    n = len(s)
+    return -sum((c / n) * math.log2(c / n) for c in freq.values())
 
 
 def redact(
